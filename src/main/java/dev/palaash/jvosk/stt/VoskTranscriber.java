@@ -2,6 +2,11 @@ package dev.palaash.jvosk.stt;
 
 import org.vosk.Model;
 import org.vosk.Recognizer;
+import ws.schild.jave.Encoder;
+import ws.schild.jave.EncoderException;
+import ws.schild.jave.MultimediaObject;
+import ws.schild.jave.encode.AudioAttributes;
+import ws.schild.jave.encode.EncodingAttributes;
 
 import javax.sound.sampled.*;
 import java.io.*;
@@ -28,9 +33,9 @@ public class VoskTranscriber {
             String fileName = audioFile.getName().toLowerCase();
             File fileToTranscribe = audioFile;
             
-            // For MP3/M4A files, convert using ffmpeg
-            if (fileName.endsWith(".mp3") || fileName.endsWith(".m4a")) {
-                tempWav = convertToWavWithFfmpeg(audioFile);
+            // Convert non-WAV files using JAVE2
+            if (needsConversion(fileName)) {
+                tempWav = convertToWavWithJave(audioFile);
                 fileToTranscribe = tempWav;
             }
             
@@ -49,74 +54,47 @@ public class VoskTranscriber {
         }
     }
     
-    private File convertToWavWithFfmpeg(File audioFile) throws IOException, InterruptedException {
-        // Check if ffmpeg is available
-        if (!isFfmpegAvailable()) {
-            throw new IOException(
-                "FFmpeg is required to process MP3/M4A files but is not installed.\\n\\n" +
-                "Installation instructions:\\n" +
-                "  macOS:   brew install ffmpeg\\n" +
-                "  Linux:   sudo apt install ffmpeg\\n" +
-                "  Windows: Download from https://ffmpeg.org/download.html\\n\\n" +
-                "Alternatively, convert your audio to WAV format first."
-            );
-        }
-        
-        // Create temp WAV file
-        File tempWav = File.createTempFile("jvosk_", ".wav");
-        
-        System.out.println("Converting " + audioFile.getName() + " to WAV format...");
-        
-        // Convert: any audio -> 16kHz mono 16-bit PCM WAV
-        ProcessBuilder pb = new ProcessBuilder(
-            "ffmpeg",
-            "-i", audioFile.getAbsolutePath(),
-            "-ar", "16000",           // 16kHz sample rate
-            "-ac", "1",                // Mono
-            "-sample_fmt", "s16",      // 16-bit signed PCM
-            "-f", "wav",               // WAV format
-            "-y",                      // Overwrite output
-            tempWav.getAbsolutePath()
-        );
-        
-        // Redirect stderr to avoid clutter (ffmpeg outputs to stderr)
-        pb.redirectError(ProcessBuilder.Redirect.PIPE);
-        Process process = pb.start();
-        
-        // Consume error stream to prevent blocking
-        new Thread(() -> {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    // Optionally log ffmpeg output
-                    if (line.contains("error") || line.contains("Error")) {
-                        System.err.println("FFmpeg: " + line);
-                    }
-                }
-            } catch (IOException ignored) {}
-        }).start();
-        
-        int exitCode = process.waitFor();
-        
-        if (exitCode != 0) {
-            tempWav.delete();
-            throw new IOException("Audio conversion failed. The file may be corrupted or in an unsupported format.");
-        }
-        
-        System.out.println("Conversion complete. Starting transcription...");
-        return tempWav;
+    private boolean needsConversion(String fileName) {
+        return fileName.endsWith(".mp3") || 
+               fileName.endsWith(".m4a") || 
+               fileName.endsWith(".flac") || 
+               fileName.endsWith(".ogg") || 
+               fileName.endsWith(".aac") || 
+               fileName.endsWith(".wma") ||
+               fileName.endsWith(".opus");
     }
     
-    private boolean isFfmpegAvailable() {
+    private File convertToWavWithJave(File audioFile) throws IOException {
         try {
-            ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-version");
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-            p.waitFor();
-            return p.exitValue() == 0;
-        } catch (Exception e) {
-            return false;
+            // Create temp WAV file
+            File tempWav = File.createTempFile("jvosk_", ".wav");
+            
+            System.out.println("Converting " + audioFile.getName() + " to WAV format...");
+            
+            // Configure audio attributes: 16kHz, mono, 16-bit PCM
+            AudioAttributes audio = new AudioAttributes();
+            audio.setCodec("pcm_s16le");      // 16-bit signed PCM little-endian
+            audio.setSamplingRate(16000);     // 16kHz sample rate
+            audio.setChannels(1);             // Mono
+            audio.setBitRate(256000);         // Standard bit rate
+            
+            // Configure encoding attributes
+            EncodingAttributes attrs = new EncodingAttributes();
+            attrs.setOutputFormat("wav");
+            attrs.setAudioAttributes(audio);
+            
+            // Perform conversion
+            Encoder encoder = new Encoder();
+            encoder.encode(new MultimediaObject(audioFile), tempWav, attrs);
+            
+            System.out.println("Conversion complete. Starting transcription...");
+            return tempWav;
+            
+        } catch (EncoderException e) {
+            throw new IOException(
+                "Audio conversion failed. The file may be corrupted or in an unsupported format.\n" +
+                "Error: " + e.getMessage(), e
+            );
         }
     }
     
