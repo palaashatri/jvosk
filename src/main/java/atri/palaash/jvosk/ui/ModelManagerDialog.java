@@ -1,7 +1,9 @@
 package atri.palaash.jvosk.ui;
 
+import atri.palaash.jvosk.models.DownloadManager;
 import atri.palaash.jvosk.models.ModelManager;
 import atri.palaash.jvosk.models.VoskModel;
+import atri.palaash.jvosk.util.NetworkUtils;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -29,6 +31,7 @@ public class ModelManagerDialog extends JDialog {
     private final JProgressBar downloadProgress;
     private final JLabel statusLabel;
     private VoskModel selectedModel = null;
+    private CompletableFuture<Void> currentDownloadTask = null;
     
     public ModelManagerDialog(Frame owner, ModelManager modelManager) {
         super(owner, "Model Manager", true);
@@ -36,7 +39,13 @@ public class ModelManagerDialog extends JDialog {
         
         setSize(1000, 600);
         setLocationRelativeTo(owner);
-        setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                onDialogClosing();
+            }
+        });
         
         JPanel mainPanel = new JPanel(new BorderLayout(10, 10));
         mainPanel.setBorder(new EmptyBorder(15, 15, 15, 15));
@@ -110,8 +119,17 @@ public class ModelManagerDialog extends JDialog {
         useButton.addActionListener(e -> useSelectedModel());
         buttonPanel.add(useButton);
         
+        JButton cancelDownloadButton = new JButton("Cancel Download");
+        cancelDownloadButton.setVisible(false);
+        cancelDownloadButton.addActionListener(e -> {
+            DownloadManager.getInstance().cancelCurrentDownload();
+            cancelDownloadButton.setVisible(false);
+            statusLabel.setText("Cancelling download...");
+        });
+        buttonPanel.add(cancelDownloadButton);
+        
         JButton closeButton = new JButton("Close");
-        closeButton.addActionListener(e -> dispose());
+        closeButton.addActionListener(e -> onDialogClosing());
         buttonPanel.add(closeButton);
         
         bottomPanel.add(buttonPanel, BorderLayout.SOUTH);
@@ -119,11 +137,35 @@ public class ModelManagerDialog extends JDialog {
         
         setContentPane(mainPanel);
         
+        // Check for active downloads and restore UI state
+        checkForActiveDownloads();
+        
         // Load models
         loadModels(false);
     }
     
+    /**
+     * Check if there's an active download from a previous dialog instance.
+     */
+    private void checkForActiveDownloads() {
+        DownloadManager dm = DownloadManager.getInstance();
+        if (dm.hasActiveDownload()) {
+            String modelName = dm.getActiveDownloadName();
+            statusLabel.setText("Resuming download: " + modelName + "...");
+            downloadProgress.setValue(0);
+            downloadProgress.setVisible(true);
+            setButtonsEnabled(false);
+        }
+    }
+    
     private void loadModels(boolean forceRefresh) {
+        // Check internet connectivity first
+        if (!NetworkUtils.isInternetAvailable()) {
+            statusLabel.setText("No internet connection - offline mode");
+            loadModelsOffline();
+            return;
+        }
+        
         statusLabel.setText("Loading models...");
         setButtonsEnabled(false);
         
@@ -141,15 +183,26 @@ public class ModelManagerDialog extends JDialog {
                 
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Failed to load models: " + e.getMessage());
-                    JOptionPane.showMessageDialog(this,
-                            "Failed to fetch models from server:\n" + e.getMessage(),
-                            "Error",
-                            JOptionPane.ERROR_MESSAGE);
+                    statusLabel.setText("Failed to load models");
+                    loadModelsOffline();
                     setButtonsEnabled(true);
                 });
             }
         });
+    }
+    
+    /**
+     * Load only installed models when offline or fetch fails.
+     */
+    private void loadModelsOffline() {
+        List<VoskModel> installedModels = modelManager.getInstalledModels();
+        tableModel.setModels(installedModels);
+        
+        if (installedModels.isEmpty()) {
+            statusLabel.setText("No models installed - internet required to download");
+        } else {
+            statusLabel.setText(installedModels.size() + " installed models available (offline)");
+        }
     }
     
     private void checkForUpdates() {
@@ -209,6 +262,15 @@ public class ModelManagerDialog extends JDialog {
         int selectedRow = modelTable.getSelectedRow();
         if (selectedRow < 0) return;
         
+        // Check internet connectivity
+        if (!NetworkUtils.isInternetAvailable()) {
+            JOptionPane.showMessageDialog(this,
+                    "No internet connection. Please connect to the internet to download models.",
+                    "Offline",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
         VoskModel model = tableModel.getModel(selectedRow);
         
         // Warn for big models
@@ -230,8 +292,11 @@ public class ModelManagerDialog extends JDialog {
         downloadProgress.setValue(0);
         statusLabel.setText("Downloading " + model.getName() + "...");
         
-        CompletableFuture.runAsync(() -> {
+        currentDownloadTask = CompletableFuture.runAsync(() -> {
             try {
+                // Register this download with DownloadManager
+                DownloadManager.getInstance().setActiveDownload(model.getName(), currentDownloadTask);
+                
                 modelManager.downloadModel(model, progress -> {
                     SwingUtilities.invokeLater(() -> {
                         downloadProgress.setValue(progress);
@@ -255,13 +320,19 @@ public class ModelManagerDialog extends JDialog {
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
                     downloadProgress.setVisible(false);
-                    statusLabel.setText("Download failed");
-                    setButtonsEnabled(true);
                     
-                    JOptionPane.showMessageDialog(this,
-                            "Failed to download model:\n" + e.getMessage(),
-                            "Download Error",
-                            JOptionPane.ERROR_MESSAGE);
+                    // Check if it was user cancellation
+                    if (e.getMessage() != null && e.getMessage().contains("cancelled")) {
+                        statusLabel.setText("Download cancelled");
+                    } else {
+                        statusLabel.setText("Download failed");
+                        JOptionPane.showMessageDialog(this,
+                                "Failed to download model:\n" + e.getMessage(),
+                                "Download Error",
+                                JOptionPane.ERROR_MESSAGE);
+                    }
+                    
+                    setButtonsEnabled(true);
                 });
             }
         });
@@ -301,6 +372,29 @@ public class ModelManagerDialog extends JDialog {
         if (selectedRow < 0) return;
         
         selectedModel = tableModel.getModel(selectedRow);
+        onDialogClosing();
+    }
+    
+    /**
+     * Handle dialog closing - check if download is in progress.
+     */
+    private void onDialogClosing() {
+        // If a download is in progress, ask user if they want to cancel
+        if (DownloadManager.getInstance().hasActiveDownload()) {
+            int result = JOptionPane.showConfirmDialog(this,
+                    "A download is in progress. Cancel it and close?\n" +
+                    "(Cancelling will remove the incomplete file)",
+                    "Download In Progress",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            
+            if (result == JOptionPane.YES_OPTION) {
+                DownloadManager.getInstance().cancelCurrentDownload();
+            } else {
+                return; // Don't close
+            }
+        }
+        
         dispose();
     }
     

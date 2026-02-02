@@ -7,6 +7,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
@@ -147,6 +148,11 @@ public class ModelManager {
             // Download
             downloadFile(model.getDownloadUrl(), zipPath, progressCallback);
             
+            // Check for cancellation
+            if (DownloadManager.getInstance().isCancellationRequested()) {
+                throw new IOException("Download cancelled by user");
+            }
+            
             // Extract
             extractZip(zipPath, extractPath);
             
@@ -167,12 +173,36 @@ public class ModelManager {
                 throw new IOException("Downloaded model is not valid");
             }
             
+        } catch (IOException e) {
+            // Clean up on failure
+            try {
+                Files.deleteIfExists(zipPath);
+                deleteDirectory(extractPath);
+            } catch (IOException ignored) {}
+            throw e;
         } finally {
             // Clean up zip file
             try {
                 Files.deleteIfExists(zipPath);
             } catch (IOException ignored) {}
+            
+            // Clear active download
+            DownloadManager.getInstance().clearActiveDownload();
         }
+    }
+    
+    /**
+     * Check if a download is currently active.
+     */
+    public boolean isDownloadInProgress() {
+        return DownloadManager.getInstance().hasActiveDownload();
+    }
+    
+    /**
+     * Cancel the current download.
+     */
+    public void cancelDownload() {
+        DownloadManager.getInstance().cancelCurrentDownload();
     }
     
     /**
@@ -242,6 +272,11 @@ public class ModelManager {
             int lastProgress = 0;
             
             while ((bytesRead = in.read(buffer)) != -1) {
+                // Check for cancellation request
+                if (DownloadManager.getInstance().isCancellationRequested()) {
+                    throw new IOException("Download cancelled by user");
+                }
+                
                 out.write(buffer, 0, bytesRead);
                 totalBytesRead += bytesRead;
                 

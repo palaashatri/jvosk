@@ -34,11 +34,14 @@ public class MainFrame extends JFrame {
     private File currentAudioFile;
     private long transcriptionStartTime;
     private boolean hasUnsavedChanges = false;
+    private boolean modelReady = false;
+    private Thread modelLoadingThread;
     
     // UI Components for actions
     private JButton copyButton;
     private JButton saveButton;
     private JButton clearButton;
+    private JButton browseButton;
     private JCheckBoxMenuItem timestampMenuItem;
     private JCheckBoxMenuItem darkModeMenuItem;
 
@@ -56,8 +59,7 @@ public class MainFrame extends JFrame {
             this.modelManager = modelManager;
         }
 
-        // Initialize transcriber with saved model preference
-        initializeTranscriber();
+        // Don't initialize transcriber yet - will be done async
 
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         addWindowListener(new java.awt.event.WindowAdapter() {
@@ -160,21 +162,66 @@ public class MainFrame extends JFrame {
         }
         
         updateButtonStates();
+        
+        // Load model in background thread after GUI is visible
+        startAsyncModelLoading();
     }
     
-    private void initializeTranscriber() {
-        String modelPath = AppPreferences.getSelectedModel();
-        try {
-            this.transcriber = new VoskTranscriber(modelPath);
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this,
-                "Failed to load model: " + modelPath + "\n" + e.getMessage(),
-                "Model Error",
-                JOptionPane.ERROR_MESSAGE);
-            
-            // Try to open model manager to download a model
-            openModelManager();
-        }
+    private void startAsyncModelLoading() {
+        setStatus("Loading model...");
+        progressBar.setVisible(true);
+        progressBar.setIndeterminate(true);
+        progressBar.setString("Initializing model in background...");
+        
+        modelLoadingThread = new Thread(() -> {
+            try {
+                String modelPath = AppPreferences.getSelectedModel();
+                try {
+                    this.transcriber = new VoskTranscriber(modelPath);
+                } catch (Exception e) {
+                    // Try default model location
+                    File modelDir = new File("models/vosk-model-small-en-us-0.15");
+                    if (modelDir.exists()) {
+                        this.transcriber = new VoskTranscriber(modelDir.getAbsolutePath());
+                        AppPreferences.setSelectedModel(modelDir.getAbsolutePath());
+                    } else {
+                        // No model found
+                        this.transcriber = null;
+                        SwingUtilities.invokeLater(() -> {
+                            setStatus("No speech model found");
+                            progressBar.setVisible(false);
+                            JOptionPane.showMessageDialog(MainFrame.this,
+                                    "No speech model found. Please download a model first.\n\n" +
+                                    "Opening Model Manager...",
+                                    "Model Required",
+                                    JOptionPane.WARNING_MESSAGE);
+                            openModelManager();
+                        });
+                        return;
+                    }
+                }
+                
+                // Model loaded successfully
+                SwingUtilities.invokeLater(() -> {
+                    modelReady = true;
+                    setStatus("Ready");
+                    progressBar.setVisible(false);
+                    updateButtonStates();
+                });
+            } catch (Exception e) {
+                SwingUtilities.invokeLater(() -> {
+                    setStatus("Error loading model");
+                    progressBar.setVisible(false);
+                    JOptionPane.showMessageDialog(MainFrame.this,
+                            "Failed to initialize model:\n" + e.getMessage(),
+                            "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+                e.printStackTrace();
+            }
+        }, "ModelLoadingThread");
+        modelLoadingThread.setDaemon(true);
+        modelLoadingThread.start();
     }
 
     private JMenuBar createMenuBar() {
@@ -294,7 +341,7 @@ public class MainFrame extends JFrame {
         JLabel dropLabel = new JLabel("<html><center>Drag & drop an audio file<br><small>WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS</small></center></html>", SwingConstants.CENTER);
         panel.add(dropLabel, BorderLayout.CENTER);
         
-        JButton browseButton = new JButton("Browse Files...");
+        browseButton = new JButton("Browse Files...");
         browseButton.addActionListener(e -> browseForFile());
         JPanel buttonPanel = new JPanel();
         buttonPanel.add(browseButton);
@@ -369,6 +416,14 @@ public class MainFrame extends JFrame {
     }
 
     private void startTranscription(File audioFile) {
+        if (!modelReady || transcriber == null) {
+            JOptionPane.showMessageDialog(this,
+                    "Model is still loading. Please wait...",
+                    "Model Loading",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
         if (currentWorker != null && !currentWorker.isDone()) {
             JOptionPane.showMessageDialog(this,
                 "A transcription is already in progress. Please wait or cancel it first.",
@@ -647,6 +702,11 @@ public class MainFrame extends JFrame {
         copyButton.setEnabled(hasText);
         saveButton.setEnabled(hasText);
         clearButton.setEnabled(hasText);
+        
+        // Disable browse button while model is loading or transcribing
+        if (browseButton != null) {
+            browseButton.setEnabled(modelReady && currentWorker == null);
+        }
     }
 
     private void updateRecentFilesMenu(JMenu recentMenu) {

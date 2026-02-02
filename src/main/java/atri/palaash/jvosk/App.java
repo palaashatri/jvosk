@@ -63,6 +63,12 @@ public class App {
         // Run in background thread
         new Thread(() -> {
             try {
+                // Check if there are installed models first
+                if (modelManager.getInstalledModels().isEmpty()) {
+                    // No models installed - don't bother checking for updates
+                    return;
+                }
+                
                 // Small delay to let the UI appear first
                 Thread.sleep(2000);
                 
