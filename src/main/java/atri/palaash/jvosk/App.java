@@ -1,11 +1,15 @@
 package atri.palaash.jvosk;
 
+import atri.palaash.jvosk.models.ModelManager;
+import atri.palaash.jvosk.models.VoskModel;
 import atri.palaash.jvosk.ui.MainFrame;
 import atri.palaash.jvosk.util.AppPreferences;
 import com.formdev.flatlaf.themes.FlatMacDarkLaf;
 import com.formdev.flatlaf.themes.FlatMacLightLaf;
 
 import javax.swing.*;
+import java.io.IOException;
+import java.util.Map;
 
 public class App {
     public static void main(String[] args) {
@@ -43,8 +47,54 @@ public class App {
         }
 
         SwingUtilities.invokeLater(() -> {
-            MainFrame frame = new MainFrame();
+            // Initialize model manager
+            ModelManager modelManager = new ModelManager("models");
+            
+            // Check for model updates in background
+            checkForModelUpdates(modelManager);
+            
+            // Create and show main frame
+            MainFrame frame = new MainFrame(modelManager);
             frame.setVisible(true);
         });
+    }
+    
+    private static void checkForModelUpdates(ModelManager modelManager) {
+        // Run in background thread
+        new Thread(() -> {
+            try {
+                // Small delay to let the UI appear first
+                Thread.sleep(2000);
+                
+                Map<String, VoskModel> updates = modelManager.checkForUpdates();
+                
+                if (!updates.isEmpty()) {
+                    SwingUtilities.invokeLater(() -> {
+                        String message = String.format(
+                                "Updates available for %d model(s):\n\n%s\n\nOpen Model Manager to download?",
+                                updates.size(),
+                                String.join("\n", updates.keySet().stream()
+                                        .map(name -> "• " + name)
+                                        .toList())
+                        );
+                        
+                        int result = JOptionPane.showConfirmDialog(
+                                null,
+                                message,
+                                "Model Updates Available",
+                                JOptionPane.YES_NO_OPTION,
+                                JOptionPane.INFORMATION_MESSAGE
+                        );
+                        
+                        // Note: User can open Model Manager from menu if they choose
+                    });
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (IOException e) {
+                // Silently fail - not critical
+                System.err.println("Failed to check for model updates: " + e.getMessage());
+            }
+        }, "Model-Update-Checker").start();
     }
 }

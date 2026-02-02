@@ -1,11 +1,11 @@
 package atri.palaash.jvosk.ui;
 
+import atri.palaash.jvosk.models.ModelManager;
+import atri.palaash.jvosk.models.VoskModel;
 import atri.palaash.jvosk.stt.VoskTranscriber;
 import atri.palaash.jvosk.util.AppPreferences;
 import atri.palaash.jvosk.util.AudioInfo;
 import atri.palaash.jvosk.util.TranscriptExporter;
-import com.formdev.flatlaf.FlatDarkLaf;
-import com.formdev.flatlaf.FlatLightLaf;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -16,6 +16,7 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.event.KeyEvent;
 import java.io.File;
+import java.io.IOException;
 import java.util.List;
 
 public class MainFrame extends JFrame {
@@ -28,6 +29,7 @@ public class MainFrame extends JFrame {
     private final JPanel dropPanel;
     
     private VoskTranscriber transcriber;
+    private ModelManager modelManager;
     private SwingWorker<Void, String> currentWorker;
     private File currentAudioFile;
     private long transcriptionStartTime;
@@ -41,7 +43,18 @@ public class MainFrame extends JFrame {
     private JCheckBoxMenuItem darkModeMenuItem;
 
     public MainFrame() {
+        this(null);
+    }
+    
+    public MainFrame(ModelManager modelManager) {
         super("jvosk – Speech-to-Text");
+
+        // Initialize model manager
+        if (modelManager == null) {
+            this.modelManager = new ModelManager("models");
+        } else {
+            this.modelManager = modelManager;
+        }
 
         // Initialize transcriber with saved model preference
         initializeTranscriber();
@@ -158,7 +171,9 @@ public class MainFrame extends JFrame {
                 "Failed to load model: " + modelPath + "\n" + e.getMessage(),
                 "Model Error",
                 JOptionPane.ERROR_MESSAGE);
-            System.exit(1);
+            
+            // Try to open model manager to download a model
+            openModelManager();
         }
     }
 
@@ -252,6 +267,21 @@ public class MainFrame extends JFrame {
         viewMenu.add(decreaseFontItem);
         
         menuBar.add(viewMenu);
+        
+        // Models Menu
+        JMenu modelsMenu = new JMenu("Models");
+        modelsMenu.setMnemonic(KeyEvent.VK_M);
+        
+        JMenuItem manageModelsItem = new JMenuItem("Manage Models...");
+        manageModelsItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_M, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx() | KeyEvent.SHIFT_DOWN_MASK));
+        manageModelsItem.addActionListener(e -> openModelManager());
+        modelsMenu.add(manageModelsItem);
+        
+        JMenuItem switchModelItem = new JMenuItem("Switch Model...");
+        switchModelItem.addActionListener(e -> switchModel());
+        modelsMenu.add(switchModelItem);
+        
+        menuBar.add(modelsMenu);
 
         return menuBar;
     }
@@ -281,6 +311,7 @@ public class MainFrame extends JFrame {
             }
 
             @Override
+            @SuppressWarnings("unchecked")
             public boolean importData(TransferSupport support) {
                 panel.setBackground(null);
                 try {
@@ -695,6 +726,67 @@ public class MainFrame extends JFrame {
 
     private void setStatus(String text) {
         statusLabel.setText(text);
+    }
+    
+    private void openModelManager() {
+        ModelManagerDialog dialog = new ModelManagerDialog(this, modelManager);
+        dialog.setVisible(true);
+        
+        VoskModel selectedModel = dialog.getSelectedModel();
+        if (selectedModel != null) {
+            switchToModel(selectedModel);
+        }
+    }
+    
+    private void switchModel() {
+        List<VoskModel> installedModels = modelManager.getInstalledModels();
+        
+        if (installedModels.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "No models installed. Please download models first.",
+                    "No Models",
+                    JOptionPane.WARNING_MESSAGE);
+            openModelManager();
+            return;
+        }
+        
+        VoskModel[] modelArray = installedModels.toArray(new VoskModel[0]);
+        VoskModel selected = (VoskModel) JOptionPane.showInputDialog(
+                this,
+                "Select a model to use:",
+                "Switch Model",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                modelArray,
+                modelArray[0]
+        );
+        
+        if (selected != null) {
+            switchToModel(selected);
+        }
+    }
+    
+    private void switchToModel(VoskModel model) {
+        try {
+            String modelPath = modelManager.getModelsDirectory()
+                    .resolve(model.getName())
+                    .toString();
+            
+            org.vosk.Model voskModel = modelManager.loadModel(model.getName());
+            transcriber.switchModel(voskModel);
+            AppPreferences.setSelectedModel(modelPath);
+            
+            JOptionPane.showMessageDialog(this,
+                    "Switched to model: " + model.getName(),
+                    "Model Switched",
+                    JOptionPane.INFORMATION_MESSAGE);
+            
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this,
+                    "Failed to load model:\n" + e.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     private void styleButton(JButton button, Color color) {
