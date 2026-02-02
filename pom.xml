@@ -33,6 +33,13 @@
             <artifactId>jave-all-deps</artifactId>
             <version>3.5.0</version>
         </dependency>
+
+        <!-- Modern Look and Feel with Dark Mode support -->
+        <dependency>
+            <groupId>com.formdev</groupId>
+            <artifactId>flatlaf</artifactId>
+            <version>3.4.1</version>
+        </dependency>
     </dependencies>
 
 

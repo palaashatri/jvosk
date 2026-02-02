@@ -26,7 +26,7 @@ public class VoskTranscriber {
 }
 
 
-    public void transcribeFile(File audioFile, Consumer<String> onText) {
+    public void transcribeFile(File audioFile, Consumer<String> onText) throws InterruptedException {
         File tempWav = null;
         
         try {
@@ -42,6 +42,9 @@ public class VoskTranscriber {
             // Transcribe WAV file
             transcribeWav(fileToTranscribe, onText);
             
+        } catch (InterruptedException e) {
+            // Re-throw interruption to allow proper cancellation handling
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Failed to read audio file: " + e.getMessage(), e);
         } finally {
@@ -64,8 +67,13 @@ public class VoskTranscriber {
                fileName.endsWith(".opus");
     }
     
-    private File convertToWavWithJave(File audioFile) throws IOException {
+    private File convertToWavWithJave(File audioFile) throws IOException, InterruptedException {
         try {
+            // Check for cancellation before starting conversion
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Conversion cancelled by user");
+            }
+            
             // Create temp WAV file
             File tempWav = File.createTempFile("jvosk_", ".wav");
             
@@ -86,6 +94,15 @@ public class VoskTranscriber {
             // Perform conversion
             Encoder encoder = new Encoder();
             encoder.encode(new MultimediaObject(audioFile), tempWav, attrs);
+            
+            // Check for cancellation after conversion
+            if (Thread.currentThread().isInterrupted()) {
+                // Clean up temp file if cancelled
+                if (tempWav.exists()) {
+                    tempWav.delete();
+                }
+                throw new InterruptedException("Conversion cancelled by user");
+            }
             
             System.out.println("Conversion complete. Starting transcription...");
             return tempWav;
@@ -128,6 +145,11 @@ public class VoskTranscriber {
             int bytesRead;
 
             while ((bytesRead = convertedStream.read(buffer)) >= 0) {
+                // Check for thread interruption (cancellation)
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException("Transcription cancelled by user");
+                }
+                
                 if (recognizer.acceptWaveForm(buffer, bytesRead)) {
                     String result = extractText(recognizer.getResult());
                     if (!result.isEmpty()) {
