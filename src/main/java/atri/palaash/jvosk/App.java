@@ -77,22 +77,19 @@ public class App {
                 if (!updates.isEmpty()) {
                     SwingUtilities.invokeLater(() -> {
                         String message = String.format(
-                                "Updates available for %d model(s):\n\n%s\n\nOpen Model Manager to download?",
+                                "Updates available for %d model(s):\n\n%s",
                                 updates.size(),
                                 String.join("\n", updates.keySet().stream()
                                         .map(name -> "• " + name)
                                         .toList())
                         );
                         
-                        int result = JOptionPane.showConfirmDialog(
+                        JOptionPane.showMessageDialog(
                                 null,
                                 message,
                                 "Model Updates Available",
-                                JOptionPane.YES_NO_OPTION,
                                 JOptionPane.INFORMATION_MESSAGE
                         );
-                        
-                        // Note: User can open Model Manager from menu if they choose
                     });
                 }
             } catch (InterruptedException e) {

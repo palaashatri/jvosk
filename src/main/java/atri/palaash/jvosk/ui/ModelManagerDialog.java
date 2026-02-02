@@ -28,6 +28,7 @@ public class ModelManagerDialog extends JDialog {
     private final JButton deleteButton;
     private final JButton useButton;
     private final JButton refreshButton;
+    private final JButton cancelDownloadButton;
     private final JProgressBar downloadProgress;
     private final JLabel statusLabel;
     private VoskModel selectedModel = null;
@@ -119,7 +120,7 @@ public class ModelManagerDialog extends JDialog {
         useButton.addActionListener(e -> useSelectedModel());
         buttonPanel.add(useButton);
         
-        JButton cancelDownloadButton = new JButton("Cancel Download");
+        cancelDownloadButton = new JButton("Cancel Download");
         cancelDownloadButton.setVisible(false);
         cancelDownloadButton.addActionListener(e -> {
             DownloadManager.getInstance().cancelCurrentDownload();
@@ -290,13 +291,18 @@ public class ModelManagerDialog extends JDialog {
         setButtonsEnabled(false);
         downloadProgress.setVisible(true);
         downloadProgress.setValue(0);
+        cancelDownloadButton.setVisible(true);
         statusLabel.setText("Downloading " + model.getName() + "...");
         
-        currentDownloadTask = CompletableFuture.runAsync(() -> {
+        // Create the CompletableFuture first, then start the async task
+        CompletableFuture<Void> downloadTask = new CompletableFuture<>();
+        currentDownloadTask = downloadTask;
+        
+        // Register with DownloadManager before starting
+        DownloadManager.getInstance().setActiveDownload(model.getName(), downloadTask);
+        
+        CompletableFuture.runAsync(() -> {
             try {
-                // Register this download with DownloadManager
-                DownloadManager.getInstance().setActiveDownload(model.getName(), currentDownloadTask);
-                
                 modelManager.downloadModel(model, progress -> {
                     SwingUtilities.invokeLater(() -> {
                         downloadProgress.setValue(progress);
@@ -305,8 +311,11 @@ public class ModelManagerDialog extends JDialog {
                     });
                 });
                 
+                downloadTask.complete(null); // Mark as successfully completed
+                
                 SwingUtilities.invokeLater(() -> {
                     downloadProgress.setVisible(false);
+                    cancelDownloadButton.setVisible(false);
                     statusLabel.setText("Download complete: " + model.getName());
                     setButtonsEnabled(true);
                     loadModels(false);
@@ -318,8 +327,11 @@ public class ModelManagerDialog extends JDialog {
                 });
                 
             } catch (IOException e) {
+                downloadTask.completeExceptionally(e); // Mark as failed
+                
                 SwingUtilities.invokeLater(() -> {
                     downloadProgress.setVisible(false);
+                    cancelDownloadButton.setVisible(false);
                     
                     // Check if it was user cancellation
                     if (e.getMessage() != null && e.getMessage().contains("cancelled")) {

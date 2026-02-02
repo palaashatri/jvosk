@@ -17,21 +17,25 @@ public class VoskTranscriber {
 
     private Model model;
     private String currentModelPath;
+    private boolean ownsModel; // Track whether we should close the model
 
     public VoskTranscriber(String modelPath) {
         this.currentModelPath = modelPath;
+        this.ownsModel = true;
         loadModel(modelPath);
     }
     
     public VoskTranscriber(Model model) {
         this.model = model;
         this.currentModelPath = null;
+        this.ownsModel = false; // Caller owns the model
     }
     
     private void loadModel(String modelPath) {
         try {
             this.model = new Model(modelPath);
             this.currentModelPath = modelPath;
+            this.ownsModel = true;
         } catch (IOException e) {
             throw new RuntimeException("Failed to load Vosk model: " + modelPath, e);
         }
@@ -41,18 +45,19 @@ public class VoskTranscriber {
      * Switch to a different model.
      */
     public void switchModel(Model newModel) {
-        if (this.model != null && this.currentModelPath != null) {
+        if (this.model != null && this.ownsModel) {
             this.model.close();
         }
         this.model = newModel;
         this.currentModelPath = null;
+        this.ownsModel = false; // Caller owns the new model
     }
     
     /**
      * Switch to a different model by path.
      */
     public void switchModel(String modelPath) {
-        if (this.model != null && this.currentModelPath != null) {
+        if (this.model != null && this.ownsModel) {
             this.model.close();
         }
         loadModel(modelPath);
