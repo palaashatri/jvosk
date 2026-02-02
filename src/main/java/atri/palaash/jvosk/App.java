@@ -8,6 +8,7 @@ import com.formdev.flatlaf.themes.FlatMacDarkLaf;
 import com.formdev.flatlaf.themes.FlatMacLightLaf;
 
 import javax.swing.*;
+import java.io.File;
 import java.io.IOException;
 import java.util.Map;
 
@@ -47,8 +48,10 @@ public class App {
         }
 
         SwingUtilities.invokeLater(() -> {
-            // Initialize model manager
-            ModelManager modelManager = new ModelManager("models");
+            // Initialize model manager with platform-agnostic user directory
+            String userHome = System.getProperty("user.home");
+            String modelsPath = userHome + File.separator + ".jvosk" + File.separator + "models";
+            ModelManager modelManager = new ModelManager(modelsPath);
             
             // Check for model updates in background
             checkForModelUpdates(modelManager);
