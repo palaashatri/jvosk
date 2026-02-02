@@ -4,6 +4,8 @@ Modern desktop application for speech-to-text transcription using Vosk offline s
 
 Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi-model support**.
 
+[Download 0.1.0-SNAPSHOT](https://github.com/palaashatri/jvosk/releases/download/0.1.0-SNAPSHOT/jvosk-0.1.0-SNAPSHOT.jar)
+
 <img width="2048" height="1176" alt="image" src="https://github.com/user-attachments/assets/88412cbd-9350-4f34-9c9f-cf094977413b" />
 
 
