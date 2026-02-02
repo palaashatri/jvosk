@@ -15,15 +15,61 @@ import java.util.function.Consumer;
 
 public class VoskTranscriber {
 
-    private final Model model;
+    private Model model;
+    private String currentModelPath;
+    private boolean ownsModel; // Track whether we should close the model
 
-  public VoskTranscriber(String modelPath) {
-    try {
-        this.model = new Model(modelPath);
-    } catch (IOException e) {
-        throw new RuntimeException("Failed to load Vosk model: " + modelPath, e);
+    public VoskTranscriber(String modelPath) {
+        this.currentModelPath = modelPath;
+        this.ownsModel = true;
+        loadModel(modelPath);
     }
-}
+    
+    public VoskTranscriber(Model model) {
+        this.model = model;
+        this.currentModelPath = null;
+        this.ownsModel = false; // Caller owns the model
+    }
+    
+    private void loadModel(String modelPath) {
+        try {
+            this.model = new Model(modelPath);
+            this.currentModelPath = modelPath;
+            this.ownsModel = true;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load Vosk model: " + modelPath, e);
+        }
+    }
+    
+    /**
+     * Switch to a different model.
+     */
+    public void switchModel(Model newModel) {
+        if (this.model != null && this.ownsModel) {
+            this.model.close();
+        }
+        this.model = newModel;
+        this.currentModelPath = null;
+        this.ownsModel = false; // Caller owns the new model
+    }
+    
+    /**
+     * Switch to a different model by path.
+     */
+    public void switchModel(String modelPath) {
+        if (this.model != null && this.ownsModel) {
+            this.model.close();
+        }
+        loadModel(modelPath);
+    }
+    
+    public String getCurrentModelPath() {
+        return currentModelPath;
+    }
+    
+    public Model getModel() {
+        return model;
+    }
 
 
     public void transcribeFile(File audioFile, Consumer<String> onText) throws InterruptedException {
@@ -140,27 +186,28 @@ public class VoskTranscriber {
                 convertedStream = ais;
             }
 
-            Recognizer recognizer = new Recognizer(model, 16000);
-            byte[] buffer = new byte[4096];
-            int bytesRead;
+            try (Recognizer recognizer = new Recognizer(model, 16000)) {
+                byte[] buffer = new byte[4096];
+                int bytesRead;
 
-            while ((bytesRead = convertedStream.read(buffer)) >= 0) {
+                while ((bytesRead = convertedStream.read(buffer)) >= 0) {
                 // Check for thread interruption (cancellation)
                 if (Thread.currentThread().isInterrupted()) {
                     throw new InterruptedException("Transcription cancelled by user");
                 }
                 
-                if (recognizer.acceptWaveForm(buffer, bytesRead)) {
-                    String result = extractText(recognizer.getResult());
-                    if (!result.isEmpty()) {
-                        onText.accept(result);
+                    if (recognizer.acceptWaveForm(buffer, bytesRead)) {
+                        String result = extractText(recognizer.getResult());
+                        if (!result.isEmpty()) {
+                            onText.accept(result);
+                        }
                     }
                 }
-            }
 
-            String finalResult = extractText(recognizer.getFinalResult());
-            if (!finalResult.isEmpty()) {
-                onText.accept(finalResult);
+                String finalResult = extractText(recognizer.getFinalResult());
+                if (!finalResult.isEmpty()) {
+                    onText.accept(finalResult);
+                }
             }
 
         } finally {
