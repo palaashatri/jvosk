@@ -1,6 +1,6 @@
-package dev.palaash.jvosk.ui;
+package atri.palaash.jvosk.ui;
 
-import dev.palaash.jvosk.stt.VoskTranscriber;
+import atri.palaash.jvosk.stt.VoskTranscriber;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;

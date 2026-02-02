@@ -1,4 +1,4 @@
-package dev.palaash.jvosk.stt;
+package atri.palaash.jvosk.stt;
 
 import org.vosk.Model;
 import org.vosk.Recognizer;
