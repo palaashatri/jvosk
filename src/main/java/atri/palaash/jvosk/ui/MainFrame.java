@@ -827,25 +827,82 @@ public class MainFrame extends JFrame {
     }
     
     private void switchToModel(VoskModel model) {
-        try {
-            String modelPath = modelManager.getModelsDirectory()
-                    .resolve(model.getName())
-                    .toString();
+        String modelPath = modelManager.getModelsDirectory()
+                .resolve(model.getName())
+                .toString();
+        
+        // If transcriber is null (still loading or not yet created), load asynchronously
+        if (transcriber == null) {
+            // Cancel any existing loading thread
+            if (modelLoadingThread != null && modelLoadingThread.isAlive()) {
+                modelLoadingThread.interrupt();
+            }
             
-            org.vosk.Model voskModel = modelManager.loadModel(model.getName());
-            transcriber.switchModel(voskModel);
-            AppPreferences.setSelectedModel(modelPath);
+            setStatus("Loading model: " + model.getName());
+            progressBar.setVisible(true);
+            progressBar.setIndeterminate(true);
+            progressBar.setString("Loading model...");
+            modelReady = false;
+            updateButtonStates();
             
-            JOptionPane.showMessageDialog(this,
-                    "Switched to model: " + model.getName(),
-                    "Model Switched",
-                    JOptionPane.INFORMATION_MESSAGE);
-            
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Failed to load model:\n" + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
+            modelLoadingThread = new Thread(() -> {
+                try {
+                    this.transcriber = new VoskTranscriber(modelPath);
+                    AppPreferences.setSelectedModel(modelPath);
+                    
+                    SwingUtilities.invokeLater(() -> {
+                        modelReady = true;
+                        setStatus("Ready");
+                        progressBar.setVisible(false);
+                        updateButtonStates();
+                        
+                        JOptionPane.showMessageDialog(MainFrame.this,
+                                "Model loaded: " + model.getName(),
+                                "Model Ready",
+                                JOptionPane.INFORMATION_MESSAGE);
+                    });
+                } catch (Exception e) {
+                    SwingUtilities.invokeLater(() -> {
+                        setStatus("Error loading model");
+                        progressBar.setVisible(false);
+                        JOptionPane.showMessageDialog(MainFrame.this,
+                                "Failed to load model:\n" + e.getMessage(),
+                                "Error",
+                                JOptionPane.ERROR_MESSAGE);
+                    });
+                    e.printStackTrace();
+                }
+            }, "ModelLoadingThread");
+            modelLoadingThread.setDaemon(true);
+            modelLoadingThread.start();
+        } else {
+            // Transcriber exists, switch model synchronously (fast operation)
+            try {
+                setStatus("Switching to model: " + model.getName());
+                progressBar.setVisible(true);
+                progressBar.setIndeterminate(true);
+                progressBar.setString("Switching model...");
+                
+                org.vosk.Model voskModel = modelManager.loadModel(model.getName());
+                transcriber.switchModel(voskModel);
+                AppPreferences.setSelectedModel(modelPath);
+                
+                setStatus("Ready");
+                progressBar.setVisible(false);
+                
+                JOptionPane.showMessageDialog(this,
+                        "Switched to model: " + model.getName(),
+                        "Model Switched",
+                        JOptionPane.INFORMATION_MESSAGE);
+                
+            } catch (IOException e) {
+                setStatus("Error switching model");
+                progressBar.setVisible(false);
+                JOptionPane.showMessageDialog(this,
+                        "Failed to load model:\n" + e.getMessage(),
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
 
