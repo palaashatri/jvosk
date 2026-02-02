@@ -18,6 +18,9 @@ import java.util.zip.ZipInputStream;
  */
 public class ModelManager {
     
+    // Sentinel value for installed models that don't have a remote download URL
+    private static final String INSTALLED_MODEL_URL = "installed://local";
+    
     private final Path modelsDirectory;
     private final ModelRegistry registry;
     private final Map<String, Model> loadedModels;
@@ -61,7 +64,7 @@ public class ModelManager {
                              VoskModel model = new VoskModel.Builder()
                                      .name(modelName)
                                      .language(extractLanguageFromName(modelName))
-                                     .downloadUrl("installed://local") // Already installed
+                                     .downloadUrl(INSTALLED_MODEL_URL) // Already installed
                                      .isInstalled(true)
                                      .installedVersion(modelName)
                                      .build();
