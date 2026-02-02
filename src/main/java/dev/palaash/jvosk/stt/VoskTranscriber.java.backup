@@ -1,0 +1,221 @@
+package dev.palaash.jvosk.stt;
+
+import javazoom.jl.decoder.*;
+import org.vosk.Model;
+import org.vosk.Recognizer;
+
+import javax.sound.sampled.*;
+import java.io.*;
+import java.util.function.Consumer;
+
+public class VoskTranscriber {
+
+    private final Model model;
+
+  public VoskTranscriber(String modelPath) {
+    try {
+        this.model = new Model(modelPath);
+    } catch (IOException e) {
+        throw new RuntimeException("Failed to load Vosk model: " + modelPath, e);
+    }
+}
+
+
+    public void transcribeFile(File audioFile, Consumer<String> onText) {
+        try {
+            String fileName = audioFile.getName().toLowerCase();
+            
+            if (fileName.endsWith(".mp3")) {
+                transcribeMp3(audioFile, onText);
+            } else {
+                transcribeWav(audioFile, onText);
+            }
+            
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to read audio file: " + e.getMessage(), e);
+        }
+    }
+    
+    private void transcribeMp3(File mp3File, Consumer<String> onText) throws Exception {
+        System.out.println("Starting MP3 transcription: " + mp3File.getName());
+        FileInputStream fis = new FileInputStream(mp3File);
+        BufferedInputStream bis = new BufferedInputStream(fis, 128 * 1024);
+        
+        try {
+            Bitstream bitstream = new Bitstream(bis);
+            Decoder decoder = new Decoder();
+            Recognizer recognizer = new Recognizer(model, 16000);
+            
+            System.out.println("MP3 decoder initialized");
+            int frameCount = 0;
+            
+            // Decode MP3 frames and feed to recognizer
+            Header header;
+            while ((header = bitstream.readFrame()) != null) {
+                SampleBuffer output = (SampleBuffer) decoder.decodeFrame(header, bitstream);
+                bitstream.closeFrame();
+                
+                frameCount++;
+                if (frameCount % 100 == 0) {
+                    System.out.println("Processed " + frameCount + " frames...");
+                }
+                
+                if (output != null) {
+                    // Convert samples to 16kHz mono PCM bytes
+                    byte[] pcmData = convertToPcm16(output);
+                    
+                    if (recognizer.acceptWaveForm(pcmData, pcmData.length)) {
+                        String result = extractText(recognizer.getResult());
+                        if (!result.isEmpty()) {
+                            System.out.println("Recognized: " + result);
+                            onText.accept(result);
+                        }
+                    }
+                }
+            }
+            
+            System.out.println("Total frames processed: " + frameCount);
+            
+            // Get final result
+            String finalResult = extractText(recognizer.getFinalResult());
+            if (!finalResult.isEmpty()) {
+                System.out.println("Final: " + finalResult);
+                onText.accept(finalResult);
+            }
+            
+        } finally {
+            bis.close();
+            fis.close();
+        }
+    }
+    
+    private byte[] convertToPcm16(SampleBuffer output) {
+        short[] samples = output.getBuffer();
+        int length = output.getBufferLength();
+        int channels = output.getChannelCount();
+        int sampleRate = output.getSampleFrequency();
+        
+        // Convert to mono if stereo
+        short[] mono = samples;
+        if (channels == 2) {
+            mono = new short[length / 2];
+            for (int i = 0; i < mono.length; i++) {
+                mono[i] = (short) ((samples[i * 2] + samples[i * 2 + 1]) / 2);
+            }
+            length = mono.length;
+        }
+        
+        // Resample to 16kHz if needed
+        if (sampleRate != 16000) {
+            mono = resample(mono, sampleRate, 16000);
+            length = mono.length;
+        }
+        
+        // Convert to byte array (little-endian 16-bit PCM)
+        byte[] pcm = new byte[length * 2];
+        for (int i = 0; i < length; i++) {
+            pcm[i * 2] = (byte) (mono[i] & 0xff);
+            pcm[i * 2 + 1] = (byte) ((mono[i] >> 8) & 0xff);
+        }
+        
+        return pcm;
+    }
+    
+    private short[] resample(short[] input, int fromRate, int toRate) {
+        if (fromRate == toRate) return input;
+        
+        double ratio = (double) toRate / fromRate;
+        int outputLength = (int) (input.length * ratio);
+        short[] output = new short[outputLength];
+        
+        for (int i = 0; i < outputLength; i++) {
+            double srcIndex = i / ratio;
+            int index = (int) srcIndex;
+            
+            if (index >= input.length - 1) {
+                output[i] = input[input.length - 1];
+            } else {
+                // Linear interpolation
+                double fraction = srcIndex - index;
+                output[i] = (short) ((1 - fraction) * input[index] + fraction * input[index + 1]);
+            }
+        }
+        
+        return output;
+    }
+    
+    private void transcribeWav(File wavFile, Consumer<String> onText) throws Exception {
+        transcribeAudioStream(wavFile, onText);
+    }
+    
+    private void transcribeAudioStream(File audioFile, Consumer<String> onText) throws IOException, UnsupportedAudioFileException {
+        AudioInputStream sourceStream = null;
+        AudioInputStream convertedStream = null;
+        
+        try {
+            // Try direct file access first (works for WAV)
+            try {
+                sourceStream = AudioSystem.getAudioInputStream(audioFile);
+            } catch (IOException e) {
+                // If direct access fails, it might be due to mark/reset for MP3
+                // Try with a fresh buffered stream
+                FileInputStream fis = new FileInputStream(audioFile);
+                // Don't use mark() - just let it fail if the decoder needs it
+                sourceStream = AudioSystem.getAudioInputStream(fis);
+            }
+
+            AudioFormat sourceFormat = sourceStream.getFormat();
+            AudioFormat targetFormat = new AudioFormat(
+                    AudioFormat.Encoding.PCM_SIGNED,
+                    16000,
+                    16,
+                    1,
+                    2,
+                    16000,
+                    false
+            );
+
+            // Convert to target format if needed
+            if (!sourceFormat.matches(targetFormat)) {
+                convertedStream = AudioSystem.getAudioInputStream(targetFormat, sourceStream);
+            } else {
+                convertedStream = sourceStream;
+            }
+
+            Recognizer recognizer = new Recognizer(model, 16000);
+            byte[] buffer = new byte[4096];
+            int bytesRead;
+
+            while ((bytesRead = convertedStream.read(buffer)) >= 0) {
+                if (recognizer.acceptWaveForm(buffer, bytesRead)) {
+                    String result = extractText(recognizer.getResult());
+                    if (!result.isEmpty()) {
+                        onText.accept(result);
+                    }
+                }
+            }
+
+            String finalResult = extractText(recognizer.getFinalResult());
+            if (!finalResult.isEmpty()) {
+                onText.accept(finalResult);
+            }
+
+        } finally {
+            if (convertedStream != null && convertedStream != sourceStream) {
+                try { convertedStream.close(); } catch (IOException ignored) {}
+            }
+            if (sourceStream != null) {
+                try { sourceStream.close(); } catch (IOException ignored) {}
+            }
+        }
+    }
+
+    private String extractText(String json) {
+        int idx = json.indexOf("\"text\"");
+        if (idx == -1) return "";
+        int start = json.indexOf('"', idx + 6);
+        int end = json.indexOf('"', start + 1);
+        if (start == -1 || end == -1) return "";
+        return json.substring(start + 1, end);
+    }
+}
