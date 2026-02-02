@@ -51,24 +51,25 @@ public class ModelManager {
                 return;
             }
             
-            Files.list(modelsDirectory)
-                    .filter(Files::isDirectory)
-                    .forEach(modelPath -> {
-                        String modelName = modelPath.getFileName().toString();
-                        
-                        // Verify it's a valid Vosk model (contains required files)
-                        if (isValidVoskModel(modelPath)) {
-                            VoskModel model = new VoskModel.Builder()
-                                    .name(modelName)
-                                    .language(extractLanguageFromName(modelName))
-                                    .downloadUrl("") // Already installed
-                                    .isInstalled(true)
-                                    .installedVersion(modelName)
-                                    .build();
-                            
-                            installedModels.put(modelName, model);
-                        }
-                    });
+            try (var paths = Files.list(modelsDirectory)) {
+                paths.filter(Files::isDirectory)
+                     .forEach(modelPath -> {
+                         String modelName = modelPath.getFileName().toString();
+                         
+                         // Verify it's a valid Vosk model (contains required files)
+                         if (isValidVoskModel(modelPath)) {
+                             VoskModel model = new VoskModel.Builder()
+                                     .name(modelName)
+                                     .language(extractLanguageFromName(modelName))
+                                     .downloadUrl("installed://local") // Already installed
+                                     .isInstalled(true)
+                                     .installedVersion(modelName)
+                                     .build();
+                             
+                             installedModels.put(modelName, model);
+                         }
+                     });
+            }
                     
         } catch (IOException e) {
             System.err.println("Failed to scan models directory: " + e.getMessage());
@@ -77,6 +78,9 @@ public class ModelManager {
     
     /**
      * Check if updates are available for installed models.
+     * Since Vosk models don't have explicit version numbers in their names,
+     * this method performs a simple name-based check. If the model name changes
+     * on the server, it will be detected as an update.
      */
     public Map<String, VoskModel> checkForUpdates() throws IOException {
         List<VoskModel> availableModels = registry.fetchModels(true);
@@ -85,10 +89,10 @@ public class ModelManager {
         for (VoskModel installed : installedModels.values()) {
             for (VoskModel available : availableModels) {
                 if (available.getName().equals(installed.getName())) {
-                    // Simple version comparison - you could make this more sophisticated
-                    if (!available.getName().equals(installed.getInstalledVersion())) {
-                        updates.put(installed.getName(), available);
-                    }
+                    // Since Vosk models don't have version numbers, we can't reliably
+                    // detect updates. This is a limitation of the current implementation.
+                    // For now, we skip update detection.
+                    // In the future, this could be enhanced with checksums or size comparison.
                     break;
                 }
             }
@@ -318,7 +322,10 @@ public class ModelManager {
                     Files.createDirectories(entryPath);
                 } else {
                     // Ensure parent directory exists
-                    Files.createDirectories(entryPath.getParent());
+                    Path parent = entryPath.getParent();
+                    if (parent != null) {
+                        Files.createDirectories(parent);
+                    }
                     
                     // Extract file
                     try (FileOutputStream fos = new FileOutputStream(entryPath.toFile())) {
@@ -340,22 +347,26 @@ public class ModelManager {
     
     private void flattenModelDirectory(Path modelDir) throws IOException {
         // Check if model files are in a subdirectory
-        List<Path> topLevelDirs = Files.list(modelDir)
-                .filter(Files::isDirectory)
-                .toList();
+        List<Path> topLevelDirs;
+        try (var paths = Files.list(modelDir)) {
+            topLevelDirs = paths.filter(Files::isDirectory)
+                    .toList();
+        }
         
         // If there's exactly one directory and no model files at top level
         if (topLevelDirs.size() == 1 && !hasModelFiles(modelDir)) {
             Path subDir = topLevelDirs.get(0);
             
             // Move all files from subdir to parent
-            Files.list(subDir).forEach(file -> {
-                try {
-                    Files.move(file, modelDir.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
-                } catch (IOException e) {
-                    System.err.println("Failed to move file: " + file);
-                }
-            });
+            try (var files = Files.list(subDir)) {
+                files.forEach(file -> {
+                    try {
+                        Files.move(file, modelDir.resolve(file.getFileName()), StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException e) {
+                        System.err.println("Failed to move file: " + file);
+                    }
+                });
+            }
             
             // Delete the now-empty subdirectory
             Files.deleteIfExists(subDir);
@@ -407,15 +418,16 @@ public class ModelManager {
     }
     
     private void deleteDirectory(Path directory) throws IOException {
-        Files.walk(directory)
-                .sorted(Comparator.reverseOrder())
-                .forEach(path -> {
-                    try {
-                        Files.delete(path);
-                    } catch (IOException e) {
-                        System.err.println("Failed to delete: " + path);
-                    }
-                });
+        try (var paths = Files.walk(directory)) {
+            paths.sorted(Comparator.reverseOrder())
+                 .forEach(path -> {
+                     try {
+                         Files.delete(path);
+                     } catch (IOException e) {
+                         System.err.println("Failed to delete: " + path);
+                     }
+                 });
+        }
     }
     
     public Path getModelsDirectory() {

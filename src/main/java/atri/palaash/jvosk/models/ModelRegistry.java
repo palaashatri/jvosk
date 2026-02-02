@@ -110,6 +110,18 @@ public class ModelRegistry {
                     continue;
                 }
                 
+                // Validate model name format (should follow vosk-model-* pattern)
+                if (!modelName.startsWith("vosk-model-")) {
+                    System.err.println("Skipping invalid model name: " + modelName);
+                    continue;
+                }
+                
+                // Validate size format (should contain M or G for megabytes/gigabytes)
+                if (!size.matches(".*[0-9]+\\s*[MGmg].*")) {
+                    System.err.println("Skipping model with invalid size: " + modelName + " (" + size + ")");
+                    continue;
+                }
+                
                 // Build download URL
                 String downloadUrl = MODELS_BASE_URL + modelName + ".zip";
                 

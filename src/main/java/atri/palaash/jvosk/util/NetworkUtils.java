@@ -1,9 +1,9 @@
 package atri.palaash.jvosk.util;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Utilities for checking network connectivity.
@@ -11,22 +11,22 @@ import java.net.URLConnection;
 public class NetworkUtils {
     
     private static final long CACHE_TIME = 5000; // 5 seconds
-    private static long lastCheckTime = 0;
-    private static boolean lastCheckResult = false;
+    private static final AtomicLong lastCheckTime = new AtomicLong(0);
+    private static volatile boolean lastCheckResult = false;
     
     /**
      * Check if internet connectivity is available.
      * Uses cached result for up to 5 seconds to avoid excessive checks.
      */
-    public static boolean isInternetAvailable() {
+    public static synchronized boolean isInternetAvailable() {
         long now = System.currentTimeMillis();
         
         // Use cached result if recent
-        if (now - lastCheckTime < CACHE_TIME) {
+        if (now - lastCheckTime.get() < CACHE_TIME) {
             return lastCheckResult;
         }
         
-        lastCheckTime = now;
+        lastCheckTime.set(now);
         lastCheckResult = performConnectivityCheck();
         
         return lastCheckResult;
