@@ -1,6 +1,6 @@
-package dev.palaash.jvosk;
+package atri.palaash.jvosk;
 
-import dev.palaash.jvosk.ui.MainFrame;
+import atri.palaash.jvosk.ui.MainFrame;
 
 import javax.swing.*;
 

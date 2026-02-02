@@ -11,5 +11,5 @@ How to Build:
 
 1. Install Maven, Java 17+ and ffmpeg (for MP3s)
 2. Build package with `mvn clean package`
-3. Run application with `mvn exec:java -Dexec.mainClass=dev.palaash.jvosk.App`
+3. Run application with `mvn exec:java -Dexec.mainClass=atri.palaash.jvosk.App`
 
