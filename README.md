@@ -4,11 +4,12 @@ Modern desktop application for speech-to-text transcription using Vosk offline s
 
 Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi-model support**.
 
-<img width="1824" height="1424" alt="image" src="https://github.com/user-attachments/assets/83072e9f-bc86-4c8f-9e46-7fce1a2508ba" />
+<img width="2048" height="1176" alt="image" src="https://github.com/user-attachments/assets/88412cbd-9350-4f34-9c9f-cf094977413b" />
+
 
 ## Features
 
-### Model Management 🆕
+### Model Management
 - **Multi-Model Support**: Download and manage multiple Vosk models
 - **Automatic Updates**: Check for model updates at startup
 - **150+ Models Available**: All models from [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models)
