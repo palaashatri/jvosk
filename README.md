@@ -71,6 +71,17 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
 - **Persistent Preferences**: Remembers your settings and selected model
 - **Adjustable Font**: Customize text size for comfort
 
+## Roadmap
+
+In priority order — each is something a user would notice:
+
+1. **Live transcription from the microphone.** Vosk is built for streaming recognition; show words as they are spoken.
+2. **Word-level timing and confidence:** highlight low-confidence words in the transcript and use word times for tighter SRT/VTT cues (Vosk returns both).
+3. **Batch transcription:** drop a folder, get a queue with per-file progress and one transcript per file.
+4. **A model list that doesn't break:** today the catalogue is scraped from the alphacephei.com HTML page, so a site redesign empties it. Ship a bundled fallback list and verify downloaded model sizes.
+5. **A real 1.0.0 release with smaller downloads:** the only release is `0.1.0-SNAPSHOT`, and the shaded jar bundles ffmpeg for every OS via `jave-all-deps`. Per-OS builds (or `jpackage` installers) would cut the size substantially.
+6. **Tests and CI** (see `AGENTS.md`) so releases stop depending on manual checks.
+
 ## Quick Start
 
 ### Requirements
