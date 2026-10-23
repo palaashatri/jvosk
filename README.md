@@ -190,6 +190,10 @@ Select multiple models and choose **Queue Selected** for sequential downloads.
 Cancelled or interrupted transfers appear as **Partial** and resume when
 queued again. Large models show a confirmation prompt before downloading.
 
+![Model Manager showing a partial download and multiple selections ready to queue](docs/screenshots/model-manager-queue.png)
+
+*Select several models to queue them sequentially; interrupted downloads remain visible with their partial progress.*
+
 ### Switching Models
 
 **Quick Switch:**
@@ -211,6 +215,18 @@ queued again. Large models show a confirmation prompt before downloading.
 - Updates are never applied automatically. Select an updated model and choose
   **Update Model**, or add it to the queue. Staged installation keeps the old
   model unless the new archive verifies and extracts successfully.
+
+![Update check showing a catalogue update and a legacy installation that needs verification](docs/screenshots/model-manager-update-check.png)
+
+*Update checks distinguish catalogue changes from older installs that need a one-time reinstall to seed metadata.*
+
+![An installed model with an update available](docs/screenshots/model-manager-update.png)
+
+*Updated models can be applied directly or added to the sequential queue.*
+
+![A legacy installation offered for one-time reinstall](docs/screenshots/model-manager-reinstall.png)
+
+*Choose **Reinstall Model** once to save catalogue metadata for a legacy install.*
 
 ### Deleting Models
 

@@ -237,8 +237,11 @@ public class ModelManagerDialog extends JDialog {
                                 "No Updates",
                                 JOptionPane.INFORMATION_MESSAGE);
                     } else {
-                        statusLabel.setText(String.format("%d update(s); %d installation(s) need verification",
-                                updates.size(), unverified.size()));
+                        String updateLabel = updates.size() == 1 ? "update" : "updates";
+                        String installationLabel = unverified.size() == 1 ? "installation" : "installations";
+                        String verificationVerb = unverified.size() == 1 ? "needs" : "need";
+                        statusLabel.setText(String.format("%d %s; %d %s %s verification",
+                                updates.size(), updateLabel, unverified.size(), installationLabel, verificationVerb));
 
                         StringBuilder message = new StringBuilder();
                         if (!updates.isEmpty()) {
