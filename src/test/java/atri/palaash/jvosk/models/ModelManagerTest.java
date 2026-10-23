@@ -18,10 +18,13 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -38,6 +41,7 @@ class ModelManagerTest {
     private HttpServer server;
     private String baseUrl;
     private byte[] goodZip;
+    private final AtomicInteger rangeRequests = new AtomicInteger();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -46,6 +50,9 @@ class ModelManagerTest {
         server.createContext("/good.zip", exchange -> send(exchange, goodZip, false));
         server.createContext("/tampered.zip", exchange -> send(exchange, tampered(goodZip), false));
         server.createContext("/chunked.zip", exchange -> send(exchange, goodZip, true));
+        server.createContext("/range.zip", this::sendRange);
+        server.createContext("/slow.zip", this::sendSlow);
+        server.createContext("/ignore-range.zip", exchange -> send(exchange, goodZip, false));
         server.start();
         baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
     }
@@ -120,6 +127,121 @@ class ModelManagerTest {
         assertEquals(100, progress.get(progress.size() - 1));
 
         assertNoDownloadArtifacts(manager.getModelsDirectory());
+    }
+
+    @Test
+    void resumesPartialDownloadAndSurfacesItsProgress() throws IOException {
+        ModelManager manager = new ModelManager(tempDir.resolve("models").toString());
+        VoskModel model = downloadModel("vosk-model-resume", "/range.zip", goodZip, md5(goodZip));
+        Path partial = manager.getModelsDirectory()
+                .resolve(".jvosk-download-vosk-model-resume.zip.part");
+        int existingBytes = goodZip.length / 3;
+        Files.write(partial, Arrays.copyOf(goodZip, existingBytes));
+
+        assertEquals(existingBytes, manager.getPartialDownloads().get("vosk-model-resume"));
+        manager.downloadModel(model, null);
+
+        assertEquals(1, rangeRequests.get(), "Expected an HTTP Range request for the existing bytes");
+        assertTrue(Files.isRegularFile(manager.getModelsDirectory()
+                .resolve("vosk-model-resume/am/final.mdl")));
+        assertFalse(manager.getPartialDownloads().containsKey("vosk-model-resume"));
+        assertNoDownloadArtifacts(manager.getModelsDirectory());
+    }
+
+    @Test
+    void cancellationKeepsPartialBytesThatCanBeResumed() throws IOException {
+        ModelManager manager = new ModelManager(tempDir.resolve("models").toString());
+        VoskModel slowModel = downloadModel("vosk-model-cancel", "/slow.zip", goodZip, md5(goodZip));
+        AtomicBoolean cancelled = new AtomicBoolean();
+
+        IOException error = assertThrows(IOException.class, () -> manager.downloadModel(slowModel, progress -> {
+            if (cancelled.compareAndSet(false, true)) {
+                DownloadManager.getInstance().cancelCurrentDownload();
+            }
+        }));
+        assertTrue(error.getMessage().contains("cancelled"));
+
+        long partialSize = manager.getPartialDownloads().get("vosk-model-cancel");
+        assertTrue(partialSize > 0 && partialSize < goodZip.length);
+        assertFalse(Files.exists(manager.getModelsDirectory().resolve("vosk-model-cancel")));
+
+        VoskModel resumableModel = downloadModel("vosk-model-cancel", "/range.zip", goodZip, md5(goodZip));
+        manager.downloadModel(resumableModel, null);
+        assertEquals(1, rangeRequests.get());
+        assertTrue(Files.isRegularFile(manager.getModelsDirectory()
+                .resolve("vosk-model-cancel/am/final.mdl")));
+        assertFalse(manager.getPartialDownloads().containsKey("vosk-model-cancel"));
+    }
+
+    @Test
+    void restartsFromZeroWhenServerIgnoresRange() throws IOException {
+        ModelManager manager = new ModelManager(tempDir.resolve("models").toString());
+        VoskModel model = downloadModel("vosk-model-ignore-range", "/ignore-range.zip", goodZip, md5(goodZip));
+        Path partial = manager.getModelsDirectory()
+                .resolve(".jvosk-download-vosk-model-ignore-range.zip.part");
+        Files.write(partial, Arrays.copyOf(goodZip, goodZip.length / 3));
+
+        manager.downloadModel(model, null);
+
+        assertTrue(Files.isRegularFile(manager.getModelsDirectory()
+                .resolve("vosk-model-ignore-range/am/final.mdl")));
+        assertNoDownloadArtifacts(manager.getModelsDirectory());
+    }
+
+    @Test
+    void persistsInstallMetadataAndDetectsCatalogueUpdatesAfterRestart() throws IOException {
+        Path modelsDirectory = tempDir.resolve("models");
+        VoskModel installedModel = modelWithMetadata(
+                "vosk-model-good", "/good.zip", goodZip, "1.0", md5(goodZip));
+        ModelManager installer = new ModelManager(modelsDirectory.toString());
+        installer.downloadModel(installedModel, null);
+
+        ModelManager restarted = new ModelManager(modelsDirectory.toString());
+        VoskModel restored = restarted.getInstalledModels().stream()
+                .filter(model -> model.getName().equals("vosk-model-good"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("1.0", restored.getCatalogueVersion());
+        assertEquals(goodZip.length, restored.getSizeBytes());
+        assertEquals(md5(goodZip), restored.getChecksumMd5());
+        assertTrue(restarted.getInstalledModelsWithoutUpdateMetadata().isEmpty());
+
+        VoskModel sameCatalogueEntry = modelWithMetadata(
+                "vosk-model-good", "/good.zip", goodZip, "1.0", md5(goodZip));
+        ModelManager unchanged = new ModelManager(modelsDirectory.toString(),
+                new ModelRegistry(() -> List.of(sameCatalogueEntry), List::of));
+        assertTrue(unchanged.checkForUpdates().isEmpty());
+
+        VoskModel changedCatalogueEntry = modelWithMetadata(
+                "vosk-model-good", "/good.zip", goodZip, "2.0", md5(tampered(goodZip)));
+        ModelManager changed = new ModelManager(modelsDirectory.toString(),
+                new ModelRegistry(() -> List.of(changedCatalogueEntry), List::of));
+        Map<String, VoskModel> updates = changed.checkForUpdates();
+        assertTrue(updates.containsKey("vosk-model-good"));
+        assertEquals("2.0", updates.get("vosk-model-good").getCatalogueVersion());
+    }
+
+    @Test
+    void failedReplacementLeavesExistingInstallationAndMetadataIntact() throws IOException {
+        Path modelsDirectory = tempDir.resolve("models");
+        ModelManager manager = new ModelManager(modelsDirectory.toString());
+        VoskModel original = modelWithMetadata(
+                "vosk-model-good", "/good.zip", goodZip, "1.0", md5(goodZip));
+        manager.downloadModel(original, null);
+
+        VoskModel invalidReplacement = modelWithMetadata(
+                "vosk-model-good", "/tampered.zip", tampered(goodZip), "2.0", md5(goodZip));
+        assertThrows(IOException.class, () -> manager.downloadModel(invalidReplacement, null));
+
+        ModelManager restarted = new ModelManager(modelsDirectory.toString());
+        VoskModel stillInstalled = restarted.getInstalledModels().stream()
+                .filter(model -> model.getName().equals("vosk-model-good"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("1.0", stillInstalled.getCatalogueVersion());
+        assertEquals(md5(goodZip), stillInstalled.getChecksumMd5());
+        assertTrue(Files.isRegularFile(modelsDirectory.resolve("vosk-model-good/am/final.mdl")));
+        assertNoDownloadArtifacts(modelsDirectory);
     }
 
     @Test
@@ -218,6 +340,7 @@ class ModelManagerTest {
         List<VoskModel> available = manager.getAvailableModels(true);
 
         assertEquals(2, available.size());
+        assertEquals(2, manager.getInstalledModelsWithoutUpdateMetadata().size());
         VoskModel current = available.stream()
                 .filter(m -> m.getName().equals("vosk-model-current"))
                 .findFirst()
@@ -273,11 +396,71 @@ class ModelManagerTest {
                 .build();
     }
 
+    private VoskModel modelWithMetadata(String name, String path, byte[] archive,
+                                        String version, String checksum) {
+        return new VoskModel.Builder()
+                .name(name)
+                .language("English")
+                .size("1M")
+                .sizeBytes(archive.length)
+                .downloadUrl(baseUrl + path)
+                .checksumMd5(checksum)
+                .catalogueVersion(version)
+                .type(VoskModel.ModelType.SMALL)
+                .build();
+    }
+
     private static void send(HttpExchange exchange, byte[] body, boolean chunked) throws IOException {
         exchange.getResponseHeaders().add("Content-Type", "application/zip");
         exchange.sendResponseHeaders(200, chunked ? 0 : body.length);
         try (OutputStream out = exchange.getResponseBody()) {
             out.write(body);
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private void sendRange(HttpExchange exchange) throws IOException {
+        String rangeHeader = exchange.getRequestHeaders().getFirst("Range");
+        if (rangeHeader == null || !rangeHeader.startsWith("bytes=")) {
+            send(exchange, goodZip, false);
+            return;
+        }
+
+        rangeRequests.incrementAndGet();
+        int offset = Integer.parseInt(rangeHeader.substring("bytes=".length(), rangeHeader.length() - 1));
+        if (offset >= goodZip.length) {
+            exchange.sendResponseHeaders(416, -1);
+            exchange.close();
+            return;
+        }
+
+        exchange.getResponseHeaders().add("Content-Type", "application/zip");
+        exchange.getResponseHeaders().add("Content-Range",
+                "bytes " + offset + "-" + (goodZip.length - 1) + "/" + goodZip.length);
+        exchange.sendResponseHeaders(206, goodZip.length - offset);
+        try (OutputStream out = exchange.getResponseBody()) {
+            out.write(goodZip, offset, goodZip.length - offset);
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private void sendSlow(HttpExchange exchange) throws IOException {
+        exchange.getResponseHeaders().add("Content-Type", "application/zip");
+        exchange.sendResponseHeaders(200, 0);
+        try (OutputStream out = exchange.getResponseBody()) {
+            for (int offset = 0; offset < goodZip.length; offset += 64) {
+                int length = Math.min(64, goodZip.length - offset);
+                out.write(goodZip, offset, length);
+                out.flush();
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Test server interrupted", e);
+                }
+            }
         } finally {
             exchange.close();
         }

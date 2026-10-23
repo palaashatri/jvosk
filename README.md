@@ -19,6 +19,8 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
 - **Machine-Readable Catalogue**: Uses Vosk's official `model-list.json`, with a bundled snapshot when offline
 - **60+ Current Models**: Speech-to-text models across 35 languages; obsolete, speaker-ID and TTS entries are excluded
 - **Verified Downloads**: Exact size and MD5 checks before a model is installed
+- **Resume and Queue**: Interrupted downloads retain partial bytes; queue several models and see partial progress
+- **Real Update Checks**: Saved catalogue version, archive size and checksum are compared against the latest catalogue
 - **Easy Switching**: Switch between models on the fly
 - **Smart Downloads**: 
   - Small models for quick downloads
@@ -78,15 +80,19 @@ In priority order — each is something a user would notice:
 1. **Live transcription from the microphone.** Vosk is built for streaming recognition; show words as they are spoken.
 2. **Word-level timing and confidence:** highlight low-confidence words in the transcript and use word times for tighter SRT/VTT cues (Vosk returns both).
 3. **Batch transcription:** drop a folder, get a queue with per-file progress and one transcript per file.
-4. **A real 1.0.0 release with smaller downloads:** the only release is `0.1.0-SNAPSHOT`, and the shaded jar bundles ffmpeg for every OS via `jave-all-deps`. Per-OS builds (or `jpackage` installers) would cut the size substantially.
-5. **Checksum-based update detection:** store the catalogue version and checksum with each installed model, then surface real updates. The current "Check for Updates" action only compares names and cannot yet detect replacements.
-6. **Per-platform integration tests:** verify zip extraction, model loading and exports on Linux, macOS and Windows in addition to the unit-test matrix.
+4. **A real 1.0.0 release:** publish user-facing release assets and `jpackage` installers; CI now builds and retains per-OS jars.
+5. **Update tracking for legacy installs:** old model folders predate persisted catalogue metadata. Reinstall them once to enable version/checksum/size comparisons.
 
 ### Recently completed
 
 - Replaced fragile HTML scraping with Vosk's machine-readable catalogue and a bundled offline snapshot.
 - Added exact download-size and MD5 verification, staged extraction and rollback-safe installation.
 - Added JUnit 5 golden-file tests for every export format and a cross-platform CI workflow.
+- Persisted catalogue version, archive size and checksum for new installs; update checks compare known metadata.
+- Added an atomic, validated catalogue refresh script (`python scripts/update-model-catalogue.py`).
+- Added cross-platform native model load/transcription integration tests with an attributed WAV fixture.
+- Added resumable HTTP Range downloads, partial-download status and sequential queueing in Model Manager.
+- Switched JAVE to OS/architecture-specific FFmpeg dependencies; the Windows shaded jar is about 56 MB (previous all-platform build: about 225 MB).
 
 ## Quick Start
 
@@ -102,7 +108,7 @@ In priority order — each is something a user would notice:
 git clone https://github.com/palaashatri/jvosk.git
 cd jvosk
 
-# Build the project and run the test suite
+# Build the project and run unit tests
 mvn clean verify
 
 # Run the application
@@ -113,9 +119,18 @@ mvn exec:java
 
 ```bash
 mvn -B verify
+
+# Optional network/native integration test (downloads the 39.3 MiB test model)
+mvn -B -Pintegration-tests verify
 ```
 
-The test suite covers the catalogue parser and offline fallback, model archive validation and zip-slip protection, download size/MD5 checks, and golden-file exports for TXT, SRT, VTT, JSON and Markdown. GitHub Actions runs `mvn -B verify` on Linux, macOS and Windows with JDK 17.
+The unit suite covers catalogue parsing and offline fallback, install metadata/update detection, archive integrity, resumable downloads, zip-slip protection, and golden-file exports. The integration profile downloads a small official English model, installs and loads it, then transcribes the attributed short WAV fixture. GitHub Actions runs the integration profile on Linux, macOS and Windows with JDK 17 and uploads a platform-specific shaded jar from each runner.
+
+Refresh the bundled catalogue intentionally (Python 3 required), review the JSON diff, then commit it with the snapshot date:
+
+```bash
+python scripts/update-model-catalogue.py
+```
 
 ### First Use
 
@@ -169,9 +184,11 @@ text-to-speech) are filtered out.
 5. Wait for download and extraction (progress shown)
 6. Model is automatically installed and ready to use
 
-Downloads are written to a temporary file and verified against the exact
-archive size and MD5 checksum from the catalogue before extraction. Large
-models will show a confirmation dialog before downloading.
+Downloads are written to a resumable partial file and verified against the
+exact archive size and MD5 checksum from the catalogue before extraction.
+Select multiple models and choose **Queue Selected** for sequential downloads.
+Cancelled or interrupted transfers appear as **Partial** and resume when
+queued again. Large models show a confirmation prompt before downloading.
 
 ### Switching Models
 
@@ -187,12 +204,13 @@ models will show a confirmation dialog before downloading.
 
 ### Model Updates
 
-- Installed models are never modified or replaced automatically.
-- The Model Manager has a **Check for Updates** action, but it currently only
-  compares model names and therefore cannot detect every replacement.
-  Checksum-based update detection is planned.
-- To move to a newer model, download it and select **Use This Model**; the old
-  model stays installed until you delete it.
+- **Check for Updates** compares persisted catalogue version, checksum and
+  exact archive size against the current catalogue.
+- Existing installations from earlier versions have no saved metadata. The UI
+  marks them as unverifiable and offers a one-time reinstall to enable tracking.
+- Updates are never applied automatically. Select an updated model and choose
+  **Update Model**, or add it to the queue. Staged installation keeps the old
+  model unless the new archive verifies and extracts successfully.
 
 ### Deleting Models
 
@@ -208,7 +226,7 @@ models will show a confirmation dialog before downloading.
 **Core Components:**
 - `VoskModel`: Immutable model metadata, including an exact byte size and optional MD5 checksum
 - `ModelRegistry`: Loads and validates Vosk's JSON catalogue, filters unsupported/obsolete entries, and falls back to the bundled snapshot
-- `ModelManager`: Downloads to a temporary file, verifies size and checksum, stages extraction, and installs with rollback
+- `ModelManager`: Persists install metadata; resumes partial downloads, verifies size/checksum, stages extraction, and installs with rollback
 - `ModelManagerDialog`: UI for managing models (catalogue and download work runs off the Swing EDT)
 - `VoskTranscriber`: Converts audio and runs recognition with the selected model
 
@@ -222,6 +240,13 @@ models will show a confirmation dialog before downloading.
   of the official catalogue (generated 2026-10-24)
 - It is used only when the remote catalogue cannot be fetched or parsed
 - The Model Manager shows when the bundled catalogue is in use
+- Refresh it with `python scripts/update-model-catalogue.py`; the script validates and atomically replaces the resource.
+
+**Platform builds:** Maven activates a matching `jave-nativebin-*` profile for
+the host OS and CPU. The shaded jar therefore contains that platform's FFmpeg
+binary rather than every platform binary. GitHub Actions retains separate
+Linux, macOS and Windows jars. Supported profiles are Windows x86/x64, Linux
+x64/ARM32/ARM64, and macOS x64/ARM64.
 
 ### Dependencies
 
@@ -244,7 +269,7 @@ models will show a confirmation dialog before downloading.
     <!-- Audio conversion -->
     <dependency>
         <groupId>ws.schild</groupId>
-        <artifactId>jave-all-deps</artifactId>
+        <artifactId>jave-core</artifactId>
         <version>3.5.0</version>
     </dependency>
     
@@ -264,6 +289,9 @@ models will show a confirmation dialog before downloading.
     </dependency>
 </dependencies>
 ```
+
+OS-specific `jave-nativebin-*` dependencies are selected by Maven profiles in
+`pom.xml` and included in the shaded jar for the build host.
 
 ## Technology Stack
 

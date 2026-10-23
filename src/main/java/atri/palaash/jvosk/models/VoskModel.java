@@ -25,6 +25,7 @@ public class VoskModel implements Comparable<VoskModel> {
     private final String license;
     private final String downloadUrl;
     private final String checksumMd5;
+    private final String catalogueVersion;
     private final ModelType type;
     private final boolean isInstalled;
     private final String installedVersion;
@@ -46,6 +47,7 @@ public class VoskModel implements Comparable<VoskModel> {
         this.license = builder.license;
         this.downloadUrl = builder.downloadUrl;
         this.checksumMd5 = builder.checksumMd5;
+        this.catalogueVersion = builder.catalogueVersion;
         this.type = builder.type;
         this.isInstalled = builder.isInstalled;
         this.installedVersion = builder.installedVersion;
@@ -61,6 +63,7 @@ public class VoskModel implements Comparable<VoskModel> {
     public String getLicense() { return license; }
     public String getDownloadUrl() { return downloadUrl; }
     public String getChecksumMd5() { return checksumMd5; }
+    public String getCatalogueVersion() { return catalogueVersion; }
     public ModelType getType() { return type; }
     public boolean isInstalled() { return isInstalled; }
     public String getInstalledVersion() { return installedVersion; }
@@ -89,6 +92,7 @@ public class VoskModel implements Comparable<VoskModel> {
                 .license(license)
                 .downloadUrl(downloadUrl)
                 .checksumMd5(checksumMd5)
+                .catalogueVersion(catalogueVersion)
                 .type(type)
                 .isInstalled(true)
                 .installedVersion(version)
@@ -179,6 +183,7 @@ public class VoskModel implements Comparable<VoskModel> {
         private String license = "";
         private String downloadUrl;
         private String checksumMd5 = null;
+        private String catalogueVersion;
         private ModelType type = ModelType.SMALL;
         private boolean isInstalled = false;
         private String installedVersion = null;
@@ -235,6 +240,14 @@ public class VoskModel implements Comparable<VoskModel> {
 
         public Builder checksumMd5(String checksumMd5) {
             this.checksumMd5 = checksumMd5;
+            return this;
+        }
+
+        /**
+         * Set the version string supplied by the Vosk model catalogue.
+         */
+        public Builder catalogueVersion(String catalogueVersion) {
+            this.catalogueVersion = catalogueVersion;
             return this;
         }
 

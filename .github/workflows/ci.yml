@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,5 +36,20 @@ jobs:
           java-version: "17"
           cache: maven
 
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Test catalogue snapshot updater
+        run: python -m unittest discover -s scripts -p "test_*.py"
+
       - name: Run tests and package
-        run: mvn -B -ntp verify
+        run: mvn -B -ntp -Pintegration-tests verify
+
+      - name: Upload platform-specific application jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvosk-${{ matrix.os }}
+          path: target/jvosk-0.1.0-SNAPSHOT.jar
+          if-no-files-found: error

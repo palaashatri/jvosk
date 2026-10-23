@@ -32,7 +32,7 @@
 
         <dependency>
             <groupId>ws.schild</groupId>
-            <artifactId>jave-all-deps</artifactId>
+            <artifactId>jave-core</artifactId>
             <version>3.5.0</version>
         </dependency>
 
@@ -96,4 +96,105 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Ship only the FFmpeg binary for the build host, not every OS. -->
+        <profile>
+            <id>ffmpeg-windows-x64</id>
+            <activation><os><family>windows</family><arch>amd64</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-win64</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-windows-x86</id>
+            <activation><os><family>windows</family><arch>x86</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-win32</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-linux-x64</id>
+            <activation><os><name>Linux</name><arch>amd64</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-linux64</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-linux-arm64</id>
+            <activation><os><name>Linux</name><arch>aarch64</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-linux-arm64</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-linux-arm32</id>
+            <activation><os><name>Linux</name><arch>arm</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-linux-arm32</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-macos-x64</id>
+            <activation><os><family>mac</family><arch>amd64</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-osx64</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>ffmpeg-macos-arm64</id>
+            <activation><os><family>mac</family><arch>aarch64</arch></os></activation>
+            <dependencies>
+                <dependency>
+                    <groupId>ws.schild</groupId>
+                    <artifactId>jave-nativebin-osxm1</artifactId>
+                    <version>3.5.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>integration-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>3.5.2</version>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

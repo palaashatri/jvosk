@@ -100,6 +100,7 @@ class VoskModelTest {
                 .description("Version 0.15")
                 .downloadUrl("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip")
                 .checksumMd5("09ab50ccd62b674cbaa231b825f9c1cb")
+                .catalogueVersion("0.15")
                 .type(VoskModel.ModelType.SMALL)
                 .build();
 
@@ -111,6 +112,7 @@ class VoskModelTest {
         assertEquals(original.getLanguage(), installed.getLanguage());
         assertEquals(original.getSizeBytes(), installed.getSizeBytes());
         assertEquals(original.getChecksumMd5(), installed.getChecksumMd5());
+        assertEquals(original.getCatalogueVersion(), installed.getCatalogueVersion());
         assertEquals(original.getDownloadUrl(), installed.getDownloadUrl());
         assertFalse(original.isInstalled());
     }

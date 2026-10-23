@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -115,7 +116,7 @@ public class TranscriptExporter {
         long minutes = (safeMs % 3600000) / 60000;
         long seconds = (safeMs % 60000) / 1000;
         long millis = safeMs % 1000;
-        return String.format("%02d:%02d:%02d,%03d", hours, minutes, seconds, millis);
+        return String.format(Locale.ROOT, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis);
     }
 
     static String formatVTTTime(long ms) {
@@ -124,7 +125,7 @@ public class TranscriptExporter {
         long minutes = (safeMs % 3600000) / 60000;
         long seconds = (safeMs % 60000) / 1000;
         long millis = safeMs % 1000;
-        return String.format("%02d:%02d:%02d.%03d", hours, minutes, seconds, millis);
+        return String.format(Locale.ROOT, "%02d:%02d:%02d.%03d", hours, minutes, seconds, millis);
     }
 
     private static String escapeJson(String text) {

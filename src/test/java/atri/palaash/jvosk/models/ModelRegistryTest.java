@@ -163,6 +163,7 @@ class ModelRegistryTest {
         assertEquals("39.3MiB", small.getSize());
         assertEquals(41_205_931, small.getSizeBytes());
         assertEquals("09ab50ccd62b674cbaa231b825f9c1cb", small.getChecksumMd5());
+        assertEquals("0.15", small.getCatalogueVersion());
         assertEquals(VoskModel.ModelType.SMALL, small.getType());
         assertEquals("Version 0.15", small.getDescription());
 

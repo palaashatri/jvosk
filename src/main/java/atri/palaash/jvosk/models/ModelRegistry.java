@@ -54,7 +54,7 @@ public class ModelRegistry {
     private List<VoskModel> models = List.of();
     private Map<String, List<VoskModel>> modelsByLanguage = Map.of();
     private long lastFetchTime = 0;
-    private boolean usingFallbackSnapshot = false;
+    private volatile boolean usingFallbackSnapshot = false;
 
     public ModelRegistry() {
         this(ModelRegistry::fetchOfficialCatalog, ModelRegistry::loadBundledCatalog);
@@ -131,8 +131,12 @@ public class ModelRegistry {
     /**
      * Whether the most recent fetch used the bundled snapshot after a failed
      * remote fetch.
+     *
+     * <p>This is a non-blocking status read: {@link #fetchModels(boolean)} may
+     * hold the registry monitor during network I/O, and callers (including the
+     * Swing EDT) must not wait for it.</p>
      */
-    public synchronized boolean isUsingFallbackSnapshot() {
+    public boolean isUsingFallbackSnapshot() {
         return usingFallbackSnapshot;
     }
 
@@ -276,6 +280,7 @@ public class ModelRegistry {
                 .description(description)
                 .downloadUrl(entry.url.trim())
                 .checksumMd5(checksum)
+                .catalogueVersion(entry.version)
                 .type(mapType(typeKey, sizeBytes))
                 .build();
     }

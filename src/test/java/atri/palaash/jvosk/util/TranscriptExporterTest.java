@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -105,6 +106,23 @@ class TranscriptExporterTest {
         assertEquals(0, segment.endTimeMs);
         assertEquals("00:00:00,000", TranscriptExporter.formatSRTTime(-42));
         assertEquals("00:00:00.000", TranscriptExporter.formatVTTTime(-42));
+    }
+
+    @Test
+    void subtitleTimesUseAsciiDigitsRegardlessOfDefaultLocale() {
+        Locale original = Locale.getDefault(Locale.Category.FORMAT);
+        try {
+            Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("ar-EG"));
+
+            assertEquals("1\n00:00:01,234 --> 00:00:02,345\nArabic text\n\n",
+                    TranscriptExporter.toSRT(List.of(
+                            new TranscriptExporter.TranscriptSegment("Arabic text", 1_234, 2_345))));
+            assertEquals("WEBVTT\n\n00:00:01.234 --> 00:00:02.345\nArabic text\n\n",
+                    TranscriptExporter.toVTT(List.of(
+                            new TranscriptExporter.TranscriptSegment("Arabic text", 1_234, 2_345))));
+        } finally {
+            Locale.setDefault(Locale.Category.FORMAT, original);
+        }
     }
 
     @Test

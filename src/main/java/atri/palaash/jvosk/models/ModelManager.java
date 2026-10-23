@@ -1,5 +1,6 @@
 package atri.palaash.jvosk.models;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.vosk.Model;
 
 import java.io.BufferedInputStream;
@@ -13,9 +14,11 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -26,6 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
@@ -38,8 +43,12 @@ public class ModelManager {
 
     // Sentinel value for installed models that don't have a remote download URL
     private static final String INSTALLED_MODEL_URL = "installed://local";
+    private static final String INSTALL_METADATA_FILE = ".jvosk-install.json";
+    private static final int INSTALL_METADATA_SCHEMA = 1;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 30_000;
+    private static final Pattern CONTENT_RANGE_PATTERN = Pattern.compile("^bytes (\\d+)-(\\d+)/(\\d+|\\*)$");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final Path modelsDirectory;
     private final ModelRegistry registry;
@@ -93,17 +102,11 @@ public class ModelManager {
                              return;
                          }
 
-                         // Verify it's a valid Vosk model (contains required files)
-                         if (isValidVoskModel(modelPath)) {
-                             VoskModel model = new VoskModel.Builder()
-                                     .name(modelName)
-                                     .language(extractLanguageFromName(modelName))
-                                     .downloadUrl(INSTALLED_MODEL_URL) // Already installed
-                                     .isInstalled(true)
-                                     .installedVersion(modelName)
-                                     .build();
+                          // Verify it's a valid Vosk model (contains required files)
+                          if (isValidVoskModel(modelPath)) {
+                              VoskModel model = readInstalledModel(modelPath, modelName);
 
-                             installedModels.put(modelName, model);
+                              installedModels.put(modelName, model);
                          }
                      });
             }
@@ -114,28 +117,130 @@ public class ModelManager {
     }
 
     /**
-     * Check if updates are available for installed models.
-     * Since Vosk models don't have explicit version numbers in their names,
-     * this method performs a simple name-based check. If the model name changes
-     * on the server, it will be detected as an update.
+     * Find installed models whose persisted catalogue metadata differs from
+     * the current catalogue. Legacy installations without metadata are left
+     * alone because their original archive cannot be identified reliably.
      */
     public Map<String, VoskModel> checkForUpdates() throws IOException {
         List<VoskModel> availableModels = registry.fetchModels(true);
         Map<String, VoskModel> updates = new HashMap<>();
 
         for (VoskModel installed : installedModels.values()) {
-            for (VoskModel available : availableModels) {
-                if (available.getName().equals(installed.getName())) {
-                    // Since Vosk models don't have version numbers, we can't reliably
-                    // detect updates. This is a limitation of the current implementation.
-                    // For now, we skip update detection.
-                    // In the future, this could be enhanced with checksums or size comparison.
-                    break;
-                }
+            VoskModel available = availableModels.stream()
+                    .filter(model -> model.getName().equals(installed.getName()))
+                    .findFirst()
+                    .orElse(null);
+            if (available != null && hasInstallMetadata(installed)
+                    && catalogueMetadataDiffers(installed, available)) {
+                updates.put(available.getName(), available.withInstalled(installed.getInstalledVersion()));
             }
         }
 
         return updates;
+    }
+
+    private static boolean hasInstallMetadata(VoskModel installed) {
+        return installed.getCatalogueVersion() != null
+                || installed.getChecksumMd5() != null
+                || installed.getSizeBytes() > 0;
+    }
+
+    private static boolean catalogueMetadataDiffers(VoskModel installed, VoskModel available) {
+        String installedVersion = installed.getCatalogueVersion();
+        String availableVersion = available.getCatalogueVersion();
+        if (isKnown(installedVersion) && isKnown(availableVersion)
+                && !installedVersion.equals(availableVersion)) {
+            return true;
+        }
+
+        String installedChecksum = installed.getChecksumMd5();
+        String availableChecksum = available.getChecksumMd5();
+        if (isKnown(installedChecksum) && isKnown(availableChecksum)
+                && !installedChecksum.equalsIgnoreCase(availableChecksum)) {
+            return true;
+        }
+
+        return installed.getSizeBytes() > 0 && available.getSizeBytes() > 0
+                && installed.getSizeBytes() != available.getSizeBytes();
+    }
+
+    private static boolean isKnown(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private VoskModel readInstalledModel(Path modelPath, String modelName) {
+        InstallMetadata metadata = readInstallMetadata(modelPath, modelName);
+        long sizeBytes = metadata == null ? 0 : metadata.archiveSizeBytes;
+        String version = metadata == null ? null : metadata.catalogueVersion;
+        VoskModel.ModelType type = sizeBytes > 500_000_000L
+                ? VoskModel.ModelType.BIG
+                : VoskModel.ModelType.SMALL;
+
+        VoskModel.Builder builder = new VoskModel.Builder()
+                .name(modelName)
+                .language(extractLanguageFromName(modelName))
+                .size(formatSize(sizeBytes))
+                .sizeBytes(sizeBytes)
+                .downloadUrl(INSTALLED_MODEL_URL)
+                .type(type)
+                .isInstalled(true)
+                .installedVersion(isKnown(version) ? version : modelName)
+                .catalogueVersion(version);
+        if (metadata != null) {
+            builder.checksumMd5(metadata.checksumMd5);
+        }
+        return builder.build();
+    }
+
+    private InstallMetadata readInstallMetadata(Path modelPath, String expectedName) {
+        Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
+        if (!Files.isRegularFile(metadataPath)) {
+            return null;
+        }
+
+        try {
+            InstallMetadata metadata = OBJECT_MAPPER.readValue(metadataPath.toFile(), InstallMetadata.class);
+            if (metadata.schemaVersion != INSTALL_METADATA_SCHEMA
+                    || !expectedName.equals(metadata.modelName)
+                    || metadata.archiveSizeBytes < 0) {
+                return null;
+            }
+            return metadata;
+        } catch (IOException | RuntimeException e) {
+            System.err.println("Ignoring invalid install metadata for " + expectedName + ": " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void writeInstallMetadata(Path modelPath, VoskModel model) throws IOException {
+        InstallMetadata metadata = new InstallMetadata();
+        metadata.schemaVersion = INSTALL_METADATA_SCHEMA;
+        metadata.modelName = model.getName();
+        metadata.catalogueVersion = model.getCatalogueVersion();
+        metadata.archiveSizeBytes = model.getSizeBytes();
+        metadata.checksumMd5 = model.getChecksumMd5();
+
+        Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
+        Path temporaryPath = modelPath.resolve(INSTALL_METADATA_FILE + ".part");
+        try {
+            OBJECT_MAPPER.writeValue(temporaryPath.toFile(), metadata);
+            moveIntoPlace(temporaryPath, metadataPath);
+        } finally {
+            deleteQuietly(temporaryPath);
+        }
+    }
+
+    private static String formatSize(long bytes) {
+        if (bytes <= 0) {
+            return "Unknown";
+        }
+        if (bytes >= 1024L * 1024L * 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1fGiB", bytes / (1024.0 * 1024.0 * 1024.0));
+        }
+        if (bytes >= 1024L * 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1fMiB", bytes / (1024.0 * 1024.0));
+        }
+        return String.format(java.util.Locale.ROOT, "%.1fKiB", bytes / 1024.0);
     }
 
     /**
@@ -189,6 +294,38 @@ public class ModelManager {
     }
 
     /**
+     * Return legacy installations that lack metadata needed for reliable
+     * catalogue-update comparisons.
+     */
+    public List<VoskModel> getInstalledModelsWithoutUpdateMetadata() {
+        return getInstalledModels().stream().filter(model -> !hasInstallMetadata(model)).toList();
+    }
+
+    /**
+     * Return the names and current byte counts of resumable partial downloads.
+     */
+    public Map<String, Long> getPartialDownloads() throws IOException {
+        Map<String, Long> partials = new java.util.TreeMap<>();
+        String prefix = ".jvosk-download-";
+        String suffix = ".zip.part";
+        try (var paths = Files.list(modelsDirectory)) {
+            for (Path path : paths.toList()) {
+                String fileName = path.getFileName().toString();
+                if (!fileName.startsWith(prefix) || !fileName.endsWith(suffix)
+                        || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    continue;
+                }
+                String name = fileName.substring(prefix.length(), fileName.length() - suffix.length());
+                long size = Files.size(path);
+                if (size > 0 && VoskModel.isSafeModelName(name)) {
+                    partials.put(name, size);
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableMap(partials);
+    }
+
+    /**
      * Download and install a model.
      *
      * @param model the model to download
@@ -204,10 +341,15 @@ public class ModelManager {
         Path tempExtract = null;
 
         try {
-            tempZip = Files.createTempFile(modelsDirectory, ".jvosk-download-", ".zip.part");
+            tempZip = modelsDirectory.resolve(".jvosk-download-" + modelName + ".zip.part");
+            if (Files.isSymbolicLink(tempZip)) {
+                Files.delete(tempZip);
+            }
+            if (!Files.exists(tempZip, LinkOption.NOFOLLOW_LINKS)) {
+                Files.createFile(tempZip);
+            }
 
-            // Download to a temporary file first so a failed transfer never
-            // looks like an installed archive.
+            // Keep this name stable so interrupted transfers can be resumed.
             downloadFile(model, tempZip, progressCallback);
 
             if (DownloadManager.getInstance().isCancellationRequested()) {
@@ -226,17 +368,26 @@ public class ModelManager {
                 throw new IOException("Downloaded model is not valid");
             }
 
+            writeInstallMetadata(tempExtract, model);
+
             installDirectory(tempExtract, extractPath);
             tempExtract = null;
 
-            installedModels.put(modelName, model.withInstalled(modelName));
+            installedModels.put(modelName, readInstalledModel(extractPath, modelName));
 
         } catch (IOException | RuntimeException e) {
             deleteQuietly(zipPath);
             deleteDirectoryQuietly(tempExtract);
+            if (tempZip != null) {
+                try {
+                    if (Files.exists(tempZip) && Files.size(tempZip) == 0) {
+                        deleteQuietly(tempZip);
+                    }
+                } catch (IOException ignored) {
+                }
+            }
             throw e;
         } finally {
-            deleteQuietly(tempZip);
             deleteQuietly(zipPath);
             deleteDirectoryQuietly(tempExtract);
 
@@ -327,41 +478,103 @@ public class ModelManager {
             throw new IOException("Unsupported model download URL scheme: " + url.getProtocol());
         }
 
+        if (isCompletePartial(model, destination)) {
+            if (progressCallback != null) {
+                progressCallback.accept(100);
+            }
+            return;
+        }
+
+        long resumeOffset = Files.size(destination);
+        long catalogueSize = model.getSizeBytes();
+        if (catalogueSize > 0 && resumeOffset > catalogueSize) {
+            deleteQuietly(destination);
+            resumeOffset = 0;
+        }
+
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
         connection.setReadTimeout(READ_TIMEOUT_MS);
         connection.setInstanceFollowRedirects(true);
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; jvosk/1.0)");
         connection.setRequestProperty("Accept", "application/zip,application/octet-stream");
+        connection.setRequestProperty("Accept-Encoding", "identity");
+        if (resumeOffset > 0) {
+            connection.setRequestProperty("Range", "bytes=" + resumeOffset + "-");
+        }
 
         try {
             int status = connection.getResponseCode();
-            if (status != HttpURLConnection.HTTP_OK) {
+            if (status == 416 && resumeOffset > 0) {
+                connection.disconnect();
+                deleteQuietly(destination);
+                downloadFile(model, destination, progressCallback);
+                return;
+            }
+            if (status != HttpURLConnection.HTTP_OK
+                    && !(status == HttpURLConnection.HTTP_PARTIAL && resumeOffset > 0)) {
                 closeQuietly(connection.getErrorStream());
                 throw new IOException("Download failed with HTTP " + status + " for " + model.getName());
             }
 
             long contentLength = connection.getContentLengthLong();
-            long catalogueSize = model.getSizeBytes();
-
-            if (contentLength > 0 && catalogueSize > 0 && contentLength != catalogueSize) {
-                throw new IOException(String.format(
-                        "Server reports %d bytes for %s but the catalogue lists %d bytes",
-                        contentLength, model.getName(), catalogueSize));
+            boolean append = status == HttpURLConnection.HTTP_PARTIAL;
+            long serverTotal = -1;
+            if (append) {
+                Matcher range = CONTENT_RANGE_PATTERN.matcher(connection.getHeaderField("Content-Range") == null
+                        ? ""
+                        : connection.getHeaderField("Content-Range"));
+                if (!range.matches()) {
+                    deleteQuietly(destination);
+                    throw new IOException("Server returned an invalid Content-Range for " + model.getName());
+                }
+                long rangeStart;
+                long rangeEnd;
+                try {
+                    rangeStart = Long.parseLong(range.group(1));
+                    rangeEnd = Long.parseLong(range.group(2));
+                    serverTotal = "*".equals(range.group(3)) ? -1 : Long.parseLong(range.group(3));
+                } catch (NumberFormatException e) {
+                    deleteQuietly(destination);
+                    throw new IOException("Server returned an invalid Content-Range for " + model.getName(), e);
+                }
+                if (rangeStart != resumeOffset || rangeEnd < rangeStart
+                        || (serverTotal > 0 && rangeEnd >= serverTotal)
+                        || (serverTotal > 0 && catalogueSize > 0 && serverTotal != catalogueSize)) {
+                    deleteQuietly(destination);
+                    throw new IOException("Server returned a mismatched Content-Range for " + model.getName());
+                }
+            } else {
+                resumeOffset = 0; // Server ignored Range; restart cleanly.
+                if (contentLength > 0 && catalogueSize > 0 && contentLength != catalogueSize) {
+                    deleteQuietly(destination);
+                    throw new IOException(String.format(
+                            "Server reports %d bytes for %s but the catalogue lists %d bytes",
+                            contentLength, model.getName(), catalogueSize));
+                }
             }
 
             // Prefer the catalogue size: it is what the app displays and what
-            // the checksum refers to. Fall back to Content-Length when the
-            // catalogue has no exact size.
-            long expectedSize = catalogueSize > 0 ? catalogueSize : contentLength;
+            // the checksum refers to. For a range response, Content-Length is
+            // the remaining segment, so use the total from Content-Range.
+            long expectedSize = catalogueSize > 0 ? catalogueSize
+                    : serverTotal > 0 ? serverTotal
+                    : contentLength > 0 ? resumeOffset + contentLength
+                    : 0;
+            if (append && contentLength > 0 && serverTotal > 0
+                    && resumeOffset + contentLength != serverTotal) {
+                deleteQuietly(destination);
+                throw new IOException("Server returned an incomplete range for " + model.getName());
+            }
 
-            MessageDigest digest = newMd5Digest();
-            long totalBytesRead = 0;
+            long totalBytesRead = resumeOffset;
             int lastProgress = -1;
 
             try (InputStream rawIn = connection.getInputStream();
                  InputStream in = new BufferedInputStream(rawIn);
-                 OutputStream out = Files.newOutputStream(destination)) {
+                 OutputStream out = Files.newOutputStream(destination,
+                         StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                         append ? StandardOpenOption.APPEND : StandardOpenOption.TRUNCATE_EXISTING)) {
 
                 byte[] buffer = new byte[8192];
                 int bytesRead;
@@ -373,7 +586,6 @@ public class ModelManager {
                     }
 
                     out.write(buffer, 0, bytesRead);
-                    digest.update(buffer, 0, bytesRead);
                     totalBytesRead += bytesRead;
 
                     if (expectedSize > 0 && progressCallback != null) {
@@ -388,9 +600,11 @@ public class ModelManager {
 
             long actualSize = Files.size(destination);
             if (actualSize == 0) {
+                deleteQuietly(destination);
                 throw new IOException("Downloaded model archive is empty");
             }
             if (expectedSize > 0 && actualSize != expectedSize) {
+                deleteQuietly(destination);
                 throw new IOException(String.format(
                         "Downloaded size mismatch: expected %d bytes but received %d bytes",
                         expectedSize, actualSize));
@@ -398,8 +612,9 @@ public class ModelManager {
 
             String expectedMd5 = model.getChecksumMd5();
             if (expectedMd5 != null) {
-                String actualMd5 = HexFormat.of().formatHex(digest.digest());
+                String actualMd5 = computeMd5(destination);
                 if (!actualMd5.equalsIgnoreCase(expectedMd5)) {
+                    deleteQuietly(destination);
                     throw new IOException("Checksum verification failed for " + model.getName()
                             + ": expected " + expectedMd5 + " but got " + actualMd5);
                 }
@@ -412,6 +627,47 @@ public class ModelManager {
         } finally {
             connection.disconnect();
         }
+    }
+
+    private boolean isCompletePartial(VoskModel model, Path path) throws IOException {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+
+        long size = Files.size(path);
+        if (size <= 0) {
+            return false;
+        }
+
+        long expectedSize = model.getSizeBytes();
+        if (expectedSize > 0 && size > expectedSize) {
+            deleteQuietly(path);
+            return false;
+        }
+        if (expectedSize > 0 && size < expectedSize) {
+            return false;
+        }
+        if (model.getChecksumMd5() != null
+                && !model.getChecksumMd5().equalsIgnoreCase(computeMd5(path))) {
+            if (expectedSize > 0 && size == expectedSize) {
+                deleteQuietly(path);
+                return false;
+            }
+            return false;
+        }
+        return expectedSize > 0 || model.getChecksumMd5() != null;
+    }
+
+    private static String computeMd5(Path path) throws IOException {
+        MessageDigest digest = newMd5Digest();
+        try (InputStream in = new BufferedInputStream(Files.newInputStream(path))) {
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private static MessageDigest newMd5Digest() throws IOException {
@@ -647,6 +903,14 @@ public class ModelManager {
             } catch (IOException ignored) {
             }
         }
+    }
+
+    private static final class InstallMetadata {
+        public int schemaVersion;
+        public String modelName;
+        public String catalogueVersion;
+        public long archiveSizeBytes;
+        public String checksumMd5;
     }
 
     public Path getModelsDirectory() {
