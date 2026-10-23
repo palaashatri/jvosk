@@ -16,20 +16,20 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
 
 ### Model Management
 - **Multi-Model Support**: Download and manage multiple Vosk models
-- **Automatic Updates**: Check for model updates at startup
-- **150+ Models Available**: All models from [alphacephei.com/vosk/models](https://alphacephei.com/vosk/models)
+- **Machine-Readable Catalogue**: Uses Vosk's official `model-list.json`, with a bundled snapshot when offline
+- **60+ Current Models**: Speech-to-text models across 35 languages; obsolete, speaker-ID and TTS entries are excluded
+- **Verified Downloads**: Exact size and MD5 checks before a model is installed
 - **Easy Switching**: Switch between models on the fly
 - **Smart Downloads**: 
-  - Small models (< 500MB) for quick downloads
-  - Big models (> 500MB) with download confirmation
+  - Small models for quick downloads
+  - Big models with a confirmation prompt
   - Progress tracking for all downloads
-- **40+ Languages**: English, Chinese, Russian, French, German, Spanish, and many more
+- **35 Languages**: English, Chinese, Russian, French, German, Spanish, and many more
 - **Model Manager UI**: 
-  - View all available models with details (size, language, accuracy)
+  - View all available models with details (size, language, version)
   - Download new models with progress bar
   - Delete unused models
-  - Check for updates
-  - Filter by installed/available status
+  - See installed/available status per model
 
 ### Audio Support
 - **Multiple Formats**: WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS
@@ -78,15 +78,21 @@ In priority order — each is something a user would notice:
 1. **Live transcription from the microphone.** Vosk is built for streaming recognition; show words as they are spoken.
 2. **Word-level timing and confidence:** highlight low-confidence words in the transcript and use word times for tighter SRT/VTT cues (Vosk returns both).
 3. **Batch transcription:** drop a folder, get a queue with per-file progress and one transcript per file.
-4. **A model list that doesn't break:** today the catalogue is scraped from the alphacephei.com HTML page, so a site redesign empties it. Ship a bundled fallback list and verify downloaded model sizes.
-5. **A real 1.0.0 release with smaller downloads:** the only release is `0.1.0-SNAPSHOT`, and the shaded jar bundles ffmpeg for every OS via `jave-all-deps`. Per-OS builds (or `jpackage` installers) would cut the size substantially.
-6. **Tests and CI** (see `AGENTS.md`) so releases stop depending on manual checks.
+4. **A real 1.0.0 release with smaller downloads:** the only release is `0.1.0-SNAPSHOT`, and the shaded jar bundles ffmpeg for every OS via `jave-all-deps`. Per-OS builds (or `jpackage` installers) would cut the size substantially.
+5. **Checksum-based update detection:** store the catalogue version and checksum with each installed model, then surface real updates. The current "Check for Updates" action only compares names and cannot yet detect replacements.
+6. **Per-platform integration tests:** verify zip extraction, model loading and exports on Linux, macOS and Windows in addition to the unit-test matrix.
+
+### Recently completed
+
+- Replaced fragile HTML scraping with Vosk's machine-readable catalogue and a bundled offline snapshot.
+- Added exact download-size and MD5 verification, staged extraction and rollback-safe installation.
+- Added JUnit 5 golden-file tests for every export format and a cross-platform CI workflow.
 
 ## Quick Start
 
 ### Requirements
 - Java 17 or higher
-- Maven 3.6+
+- Maven 3.8+
 - No additional dependencies needed!
 
 ### Build & Run
@@ -96,12 +102,20 @@ In priority order — each is something a user would notice:
 git clone https://github.com/palaashatri/jvosk.git
 cd jvosk
 
-# Build the project
-mvn clean package
+# Build the project and run the test suite
+mvn clean verify
 
 # Run the application
-mvn exec:java -Dexec.mainClass=atri.palaash.jvosk.App
+mvn exec:java
 ```
+
+### Tests and CI
+
+```bash
+mvn -B verify
+```
+
+The test suite covers the catalogue parser and offline fallback, model archive validation and zip-slip protection, download size/MD5 checks, and golden-file exports for TXT, SRT, VTT, JSON and Markdown. GitHub Actions runs `mvn -B verify` on Linux, macOS and Windows with JDK 17.
 
 ### First Use
 
@@ -125,23 +139,26 @@ mvn exec:java -Dexec.mainClass=atri.palaash.jvosk.App
 
 ### Available Models
 
-The app provides access to 150+ models from the official Vosk repository:
+The app reads Vosk's official machine-readable catalogue
+([`model-list.json`](https://alphacephei.com/vosk/models/model-list.json)) and
+falls back to a bundled snapshot when the catalogue cannot be fetched. The
+current snapshot contains **63 current speech-to-text models across 35
+languages**; obsolete models and archives this app cannot use (speaker-ID,
+text-to-speech) are filtered out.
 
 **Popular Languages:**
-- **English**: 10+ models (US, Indian accents)
-- **Chinese**: 3 models
-- **Russian**: 4 models
-- **French**: 3 models
-- **German**: 4 models
+- **English**: US English, UK English and Indian English models
+- **Chinese**: 2 models
+- **Russian**: 2 models
+- **French**: 2 models
+- **German**: 2 models
 - **Spanish**: 2 models
 - **Japanese**: 2 models
-- **And 40+ more languages!**
+- **And 25+ more languages!**
 
 **Model Types:**
-- **Small Models** (< 100MB): Fast, good for mobile/desktop, lightweight
-- **Big Models** (> 500MB): Higher accuracy, server-grade
-- **Punctuation Models**: Add punctuation and capitalization
-- **Speaker ID Models**: Identify different speakers
+- **Small Models**: Size-optimised, good for mobile/desktop, lightweight
+- **Big Models**: Higher accuracy, more memory and disk space
 
 ### Downloading Models
 
@@ -152,7 +169,9 @@ The app provides access to 150+ models from the official Vosk repository:
 5. Wait for download and extraction (progress shown)
 6. Model is automatically installed and ready to use
 
-**Note:** Large models will show a confirmation dialog before downloading.
+Downloads are written to a temporary file and verified against the exact
+archive size and MD5 checksum from the catalogue before extraction. Large
+models will show a confirmation dialog before downloading.
 
 ### Switching Models
 
@@ -166,12 +185,14 @@ The app provides access to 150+ models from the official Vosk repository:
 2. Select an installed model
 3. Click "Use This Model"
 
-### Automatic Updates
+### Model Updates
 
-- On startup, the app checks for model updates
-- If updates are available, you'll see a notification
-- Updates can be downloaded through the Model Manager
-- Models are never auto-updated without your confirmation
+- Installed models are never modified or replaced automatically.
+- The Model Manager has a **Check for Updates** action, but it currently only
+  compares model names and therefore cannot detect every replacement.
+  Checksum-based update detection is planned.
+- To move to a newer model, download it and select **Use This Model**; the old
+  model stays installed until you delete it.
 
 ### Deleting Models
 
@@ -184,18 +205,23 @@ The app provides access to 150+ models from the official Vosk repository:
 
 ### Architecture
 
-**New Components:**
-- `VoskModel`: Data class for model metadata
-- `ModelRegistry`: Parses Vosk models page and fetches model information
-- `ModelManager`: Handles downloading, installing, version checking, and loading models
-- `ModelManagerDialog`: UI for managing models
-- Enhanced `VoskTranscriber`: Supports switching between models
-- Updated `App`: Checks for model updates on startup
+**Core Components:**
+- `VoskModel`: Immutable model metadata, including an exact byte size and optional MD5 checksum
+- `ModelRegistry`: Loads and validates Vosk's JSON catalogue, filters unsupported/obsolete entries, and falls back to the bundled snapshot
+- `ModelManager`: Downloads to a temporary file, verifies size and checksum, stages extraction, and installs with rollback
+- `ModelManagerDialog`: UI for managing models (catalogue and download work runs off the Swing EDT)
+- `VoskTranscriber`: Converts audio and runs recognition with the selected model
 
 **Model Storage:**
-- All models stored in `models/` directory
-- Each model in its own subdirectory
-- Models are standard Vosk format (can be used with other Vosk tools)
+- Models are stored in `~/.jvosk/models/` (`%USERPROFILE%\.jvosk\models` on Windows)
+- Each model is in its own subdirectory named after the catalogue entry
+- Models use the standard Vosk format and can be used with other Vosk tools
+
+**Catalogue Fallback:**
+- `src/main/resources/atri/palaash/jvosk/models/model-list.json` is a snapshot
+  of the official catalogue (generated 2026-10-24)
+- It is used only when the remote catalogue cannot be fetched or parsed
+- The Model Manager shows when the bundled catalogue is in use
 
 ### Dependencies
 
@@ -222,23 +248,22 @@ The app provides access to 150+ models from the official Vosk repository:
         <version>3.5.0</version>
     </dependency>
     
-    <!-- Web scraping for model registry -->
-    <dependency>
-        <groupId>org.jsoup</groupId>
-        <artifactId>jsoup</artifactId>
-        <version>1.17.2</version>
-    </dependency>
-    
-    <!-- JSON processing -->
+    <!-- JSON catalogue parsing -->
     <dependency>
         <groupId>com.fasterxml.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
         <version>2.17.1</version>
     </dependency>
+
+    <!-- Tests -->
+    <dependency>
+        <groupId>org.junit.jupiter</groupId>
+        <artifactId>junit-jupiter</artifactId>
+        <version>5.11.4</version>
+        <scope>test</scope>
+    </dependency>
 </dependencies>
 ```
-3. Wait for transcription to complete
-4. Copy, save, or export your transcript
 
 ## Technology Stack
 

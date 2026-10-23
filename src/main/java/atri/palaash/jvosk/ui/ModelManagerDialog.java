@@ -32,7 +32,6 @@ public class ModelManagerDialog extends JDialog {
     private final JProgressBar downloadProgress;
     private final JLabel statusLabel;
     private VoskModel selectedModel = null;
-    private CompletableFuture<Void> currentDownloadTask = null;
     
     public ModelManagerDialog(Frame owner, ModelManager modelManager) {
         super(owner, "Model Manager", true);
@@ -160,28 +159,23 @@ public class ModelManagerDialog extends JDialog {
     }
     
     private void loadModels(boolean forceRefresh) {
-        // Check internet connectivity first
-        if (!NetworkUtils.isInternetAvailable()) {
-            statusLabel.setText("No internet connection - offline mode");
-            loadModelsOffline();
-            return;
-        }
-        
         statusLabel.setText("Loading models...");
         setButtonsEnabled(false);
-        
+
         CompletableFuture.runAsync(() -> {
             try {
-                List<VoskModel> models = modelManager.getAvailableModels();
-                
+                List<VoskModel> models = modelManager.getAvailableModels(forceRefresh);
+
                 SwingUtilities.invokeLater(() -> {
                     tableModel.setModels(models);
-                    statusLabel.setText(String.format("Found %d models (%d installed)", 
-                            models.size(), 
-                            models.stream().filter(VoskModel::isInstalled).count()));
+                    boolean bundled = modelManager.isUsingFallbackCatalogue();
+                    statusLabel.setText(String.format("Found %d models (%d installed)%s",
+                            models.size(),
+                            models.stream().filter(VoskModel::isInstalled).count(),
+                            bundled ? " - bundled catalogue (offline)" : ""));
                     setButtonsEnabled(true);
                 });
-                
+
             } catch (IOException e) {
                 SwingUtilities.invokeLater(() -> {
                     statusLabel.setText("Failed to load models");
@@ -263,15 +257,6 @@ public class ModelManagerDialog extends JDialog {
         int selectedRow = modelTable.getSelectedRow();
         if (selectedRow < 0) return;
         
-        // Check internet connectivity
-        if (!NetworkUtils.isInternetAvailable()) {
-            JOptionPane.showMessageDialog(this,
-                    "No internet connection. Please connect to the internet to download models.",
-                    "Offline",
-                    JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        
         VoskModel model = tableModel.getModel(selectedRow);
         
         // Warn for big models
@@ -296,13 +281,18 @@ public class ModelManagerDialog extends JDialog {
         
         // Create the CompletableFuture first, then start the async task
         CompletableFuture<Void> downloadTask = new CompletableFuture<>();
-        currentDownloadTask = downloadTask;
         
         // Register with DownloadManager before starting
         DownloadManager.getInstance().setActiveDownload(model.getName(), downloadTask);
         
         CompletableFuture.runAsync(() -> {
             try {
+                // Connectivity checks can block for several seconds, so they
+                // belong on this worker thread rather than the EDT.
+                if (!NetworkUtils.isInternetAvailable()) {
+                    throw new IOException("No internet connection. Connect to the internet and try again.");
+                }
+
                 modelManager.downloadModel(model, progress -> {
                     SwingUtilities.invokeLater(() -> {
                         downloadProgress.setValue(progress);
@@ -347,7 +337,8 @@ public class ModelManagerDialog extends JDialog {
                     setButtonsEnabled(true);
                 });
             }
-        });
+        }).whenComplete((ignored, error) ->
+                DownloadManager.getInstance().clearActiveDownload());
     }
     
     private void deleteSelectedModel() {
@@ -355,9 +346,10 @@ public class ModelManagerDialog extends JDialog {
         if (selectedRow < 0) return;
         
         VoskModel model = tableModel.getModel(selectedRow);
+        String modelName = model.getName();
         
         int result = JOptionPane.showConfirmDialog(this,
-                "Are you sure you want to delete this model?\n" + model.getName(),
+                "Are you sure you want to delete this model?\n" + modelName,
                 "Confirm Delete",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
@@ -365,18 +357,30 @@ public class ModelManagerDialog extends JDialog {
         if (result != JOptionPane.YES_OPTION) {
             return;
         }
-        
-        try {
-            modelManager.deleteModel(model.getName());
-            statusLabel.setText("Deleted: " + model.getName());
-            loadModels(false);
-            
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Failed to delete model:\n" + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
-        }
+
+        setButtonsEnabled(false);
+        statusLabel.setText("Deleting " + modelName + "...");
+
+        // Deleting a multi-gigabyte model can take a while; keep it off the EDT.
+        CompletableFuture.runAsync(() -> {
+            try {
+                modelManager.deleteModel(modelName);
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Deleted: " + modelName);
+                    setButtonsEnabled(true);
+                    loadModels(false);
+                });
+            } catch (IOException e) {
+                SwingUtilities.invokeLater(() -> {
+                    setButtonsEnabled(true);
+                    statusLabel.setText("Failed to delete model");
+                    JOptionPane.showMessageDialog(this,
+                            "Failed to delete model:\n" + e.getMessage(),
+                            "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+            }
+        });
     }
     
     private void useSelectedModel() {

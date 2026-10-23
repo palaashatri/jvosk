@@ -1,0 +1,7 @@
+{
+  "segments": [
+    {"text": "Hello, world!", "start": 0, "end": 1234},
+    {"text": "He said \"hi\" and left a backslash \\ here.", "start": 3723456, "end": 3729456},
+    {"text": "Café — 日本語", "start": 3600000, "end": 3601500}
+  ]
+}
