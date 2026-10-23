@@ -1,0 +1,4 @@
+Audio fixture: vosk-test.wav
+Source: https://github.com/alphacep/vosk-api/blob/master/python/example/test.wav
+Repository license: Apache License 2.0 (https://github.com/alphacep/vosk-api/blob/master/COPYING)
+SHA-256: dcfea5712c43a43ba7ae8083afb39d36993e5a69c46e88b68aaa72b65cb615bb
