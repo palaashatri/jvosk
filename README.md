@@ -93,7 +93,7 @@ In priority order — each is something a user would notice:
 - Added cross-platform native model load/transcription integration tests with an attributed WAV fixture.
 - Added resumable HTTP Range downloads, partial-download status and sequential queueing in Model Manager.
 - Switched JAVE to OS/architecture-specific FFmpeg dependencies; the Windows shaded jar is about 56 MB (previous all-platform build: about 225 MB).
-- Seeded `.jvosk-install.json` for legacy model folders from matching catalogue entries (no reinstall required when the name is still listed).
+- Seeded `.jvosk-install.json` stubs for legacy model folders without copying unverified catalogue identity.
 - Persisted the Model Manager download queue across restarts; cancelled queues can be resumed.
 - Added Swing tests for update/reinstall labels, queue cancellation leftovers and partial-download status.
 - Added a signed-tag release workflow that publishes `jpackage` installers.
@@ -217,10 +217,9 @@ time Model Manager opens. Large models show a confirmation prompt before downloa
 
 - **Check for Updates** compares persisted catalogue version, checksum and
   exact archive size against the current catalogue.
-- Legacy folders that match a catalogue name are seeded with
-  `.jvosk-install.json` on startup, so they join update tracking without a
-  reinstall. Installs whose names are no longer in the catalogue still need a
-  one-time reinstall.
+- Legacy folders get a `.jvosk-install.json` stub on startup so they are
+  recognised, but catalogue version/size/checksum are not copied from the
+  name. A reinstall is still required before update checks can trust them.
 - Updates are never applied automatically. Select an updated model and choose
   **Update Model**, or add it to the queue. Staged installation keeps the old
   model unless the new archive verifies and extracts successfully.

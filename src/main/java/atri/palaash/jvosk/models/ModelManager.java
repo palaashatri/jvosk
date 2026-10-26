@@ -219,7 +219,10 @@ public class ModelManager {
         metadata.catalogueVersion = model.getCatalogueVersion();
         metadata.archiveSizeBytes = model.getSizeBytes();
         metadata.checksumMd5 = model.getChecksumMd5();
+        persistInstallMetadata(modelPath, metadata);
+    }
 
+    private static void persistInstallMetadata(Path modelPath, InstallMetadata metadata) throws IOException {
         Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
         Path temporaryPath = modelPath.resolve(INSTALL_METADATA_FILE + ".part");
         try {
@@ -302,32 +305,38 @@ public class ModelManager {
     }
 
     /**
-     * Write {@code .jvosk-install.json} for valid installed models that predate
-     * persistence, copying version, size and checksum from a matching catalogue
-     * entry. Staging/backup directories, unsafe names and invalid Vosk trees are
-     * ignored because {@link #scanInstalledModels()} never lists them. Existing
-     * metadata is left unchanged. Returns the number of files written.
+     * Write a metadata stub for valid installed models that predate persistence.
+     * Existing {@code .jvosk-install.json} files are left unchanged, including
+     * ones this version cannot parse. Catalogue version, size and checksum are
+     * not copied from the model name — those remain unset until a verified
+     * install. Returns the number of files written.
      */
     public int migrateLegacyInstalls() throws IOException {
-        Map<String, VoskModel> catalogueByName = new HashMap<>();
-        for (VoskModel model : registry.fetchModels(false)) {
-            catalogueByName.put(model.getName(), model);
-        }
-
         scanInstalledModels();
         int written = 0;
-        for (VoskModel installed : getInstalledModelsWithoutUpdateMetadata()) {
-            VoskModel catalogueEntry = catalogueByName.get(installed.getName());
-            if (catalogueEntry == null) {
+        for (VoskModel installed : getInstalledModels()) {
+            Path modelPath = modelsDirectory.resolve(installed.getName());
+            Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
+            if (Files.exists(metadataPath)) {
                 continue;
             }
-            writeInstallMetadata(modelsDirectory.resolve(installed.getName()), catalogueEntry);
+            writeLegacyInstallStub(modelPath, installed.getName());
             written++;
         }
         if (written > 0) {
             scanInstalledModels();
         }
         return written;
+    }
+
+    private void writeLegacyInstallStub(Path modelPath, String modelName) throws IOException {
+        InstallMetadata metadata = new InstallMetadata();
+        metadata.schemaVersion = INSTALL_METADATA_SCHEMA;
+        metadata.modelName = modelName;
+        metadata.catalogueVersion = null;
+        metadata.archiveSizeBytes = 0;
+        metadata.checksumMd5 = null;
+        persistInstallMetadata(modelPath, metadata);
     }
 
     /**

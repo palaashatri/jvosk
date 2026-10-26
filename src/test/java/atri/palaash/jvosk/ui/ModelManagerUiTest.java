@@ -1,15 +1,11 @@
 package atri.palaash.jvosk.ui;
 
 import atri.palaash.jvosk.models.DownloadManager;
-import atri.palaash.jvosk.models.DownloadQueue;
 import atri.palaash.jvosk.models.VoskModel;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
-import javax.swing.JButton;
 import javax.swing.JTable;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -20,8 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ModelManagerUiTest {
 
-    @TempDir
-    Path tempDir;
+    @AfterEach
+    void resetDownloadManager() {
+        DownloadManager.getInstance().clearActiveDownload();
+    }
 
     @Test
     void tableShowsPartialDownloadStatus() {
@@ -58,22 +56,20 @@ class ModelManagerUiTest {
     }
 
     @Test
-    void queueCancellationKeepsRemainingNamesForResume() throws Exception {
-        Path models = tempDir.resolve("models");
-        Files.createDirectories(models);
-        DownloadQueue queue = new DownloadQueue(models);
-        queue.setPending(List.of("vosk-model-a", "vosk-model-b", "vosk-model-c"));
+    void resumableModelsDropsUnknownDuplicatesAndInstalled() {
+        VoskModel pending = model("vosk-model-a", false, 100);
+        VoskModel installed = model("vosk-model-installed", true, 100);
+        VoskModel update = model("vosk-model-update", true, 100);
+        List<VoskModel> catalogue = List.of(pending, installed, update);
 
-        JButton cancel = new JButton("Cancel Download");
-        cancel.addActionListener(e -> DownloadManager.getInstance().cancelCurrentDownload());
+        List<VoskModel> resume = ModelDownloadActions.resumableModels(
+                List.of("vosk-model-a", "missing", "vosk-model-a", "vosk-model-installed", "vosk-model-update"),
+                catalogue,
+                Set.of("vosk-model-update"),
+                Set.of());
 
-        queue.markCompleted("vosk-model-a");
-        cancel.doClick();
-        assertTrue(DownloadManager.getInstance().isCancellationRequested());
-
-        DownloadQueue restarted = new DownloadQueue(models);
-        assertEquals(List.of("vosk-model-b", "vosk-model-c"), restarted.remaining());
-        DownloadManager.getInstance().clearActiveDownload();
+        assertEquals(List.of("vosk-model-a", "vosk-model-update"),
+                resume.stream().map(VoskModel::getName).toList());
     }
 
     private static VoskModel model(String name, boolean installed, long sizeBytes) {

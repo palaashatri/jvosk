@@ -2,6 +2,8 @@ package atri.palaash.jvosk.ui;
 
 import atri.palaash.jvosk.models.VoskModel;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -33,5 +35,26 @@ public final class ModelDownloadActions {
             return "Resume Download";
         }
         return "Download Model";
+    }
+
+    /**
+     * Resolve persisted queue names against the current catalogue, dropping
+     * unknown, duplicate, and already-installed names that are not update or
+     * reinstall candidates.
+     */
+    public static List<VoskModel> resumableModels(List<String> pending,
+                                                  List<VoskModel> catalogue,
+                                                  Set<String> updatesAvailable,
+                                                  Set<String> metadataMissing) {
+        Map<String, VoskModel> byName = new java.util.LinkedHashMap<>();
+        for (VoskModel model : catalogue) {
+            byName.put(model.getName(), model);
+        }
+        return pending.stream()
+                .map(byName::get)
+                .filter(java.util.Objects::nonNull)
+                .filter(model -> isDownloadCandidate(model, updatesAvailable, metadataMissing))
+                .distinct()
+                .toList();
     }
 }

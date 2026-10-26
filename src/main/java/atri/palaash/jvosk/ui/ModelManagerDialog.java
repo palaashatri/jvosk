@@ -13,7 +13,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -315,16 +314,8 @@ public class ModelManagerDialog extends JDialog {
             return;
         }
         resumePromptShown = true;
-        Map<String, VoskModel> byName = new java.util.LinkedHashMap<>();
-        for (VoskModel model : models) {
-            byName.put(model.getName(), model);
-        }
-        List<VoskModel> resume = pending.stream()
-                .map(byName::get)
-                .filter(Objects::nonNull)
-                .filter(this::isDownloadCandidate)
-                .distinct()
-                .toList();
+        List<VoskModel> resume = ModelDownloadActions.resumableModels(
+                pending, models, updatesAvailable, metadataMissing);
         if (resume.isEmpty()) {
             try {
                 downloadQueue.clear();
@@ -339,6 +330,12 @@ public class ModelManagerDialog extends JDialog {
                 JOptionPane.YES_NO_OPTION);
         if (result == JOptionPane.YES_OPTION) {
             queueModels(resume);
+        } else if (result == JOptionPane.NO_OPTION) {
+            try {
+                downloadQueue.clear();
+            } catch (IOException e) {
+                System.err.println("Failed to discard declined download queue: " + e.getMessage());
+            }
         }
     }
 
