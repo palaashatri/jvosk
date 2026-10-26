@@ -3,3 +3,4 @@ dependency-reduced-pom.xml
 .vscode
 .DS_Store
 .idea
+dist/

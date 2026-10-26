@@ -8,7 +8,7 @@ jvosk is a Java 17 Swing desktop app for offline speech-to-text with [Vosk](http
 - **JUnit 5 suite and GitHub Actions CI.** Unit tests run with `mvn -B verify`; CI also runs `mvn -B -Pintegration-tests verify` on Linux, macOS and Windows, then retains each platform's shaded jar.
 - The model catalogue comes from Vosk's official `model-list.json`, parsed with Jackson. A bundled snapshot is used when fetching/parsing fails and can be refreshed with `python scripts/update-model-catalogue.py`.
 - New installs persist catalogue version, archive size and checksum for real update checks. Downloads resume via HTTP Range, can be queued in the Model Manager, and are verified before staged extraction/rollback-safe installation. Zip-slip protection remains enabled.
-- **Known limitations:** installations created before metadata persistence must be reinstalled once for update tracking; snapshot refreshes are manual; there are no Swing UI tests or `jpackage` installers.
+- **Known limitations:** snapshot refreshes are manual; installs whose names are no longer in the catalogue still cannot get update metadata without a reinstall; native `jpackage` installers are unsigned.
 
 ## Commands
 
@@ -22,6 +22,8 @@ mvn -B verify                                              # unit tests + packag
 mvn -B -Pintegration-tests verify                          # native model load + short WAV transcription smoke test
 mvn test                                                   # unit/golden-file tests only
 python scripts/update-model-catalogue.py                   # validate and refresh the bundled JSON snapshot
+python scripts/package-release.py --jar target/jvosk-0.1.0-SNAPSHOT.jar --version 0.1.0 --dest dist
+git tag -s v1.0.0 -m "jvosk 1.0.0" && git push origin v1.0.0   # signed tag; release workflow publishes jars + jpackage assets
 ```
 
 Models are stored in `~/.jvosk/models/<model-name>/`.
@@ -31,10 +33,10 @@ Models are stored in `~/.jvosk/models/<model-name>/`.
 | Path | What it does |
 |---|---|
 | `App.java` | Entry point: look-and-feel, model manager, background update check |
-| `models/` | `ModelRegistry` (JSON catalogue + offline snapshot), `ModelManager` (metadata, resume/queue, verified staged install/delete/scan), `DownloadManager`, `VoskModel` |
+| `models/` | `ModelRegistry` (JSON catalogue + offline snapshot), `ModelManager` (metadata, resume/queue, verified staged install/delete/scan/legacy migration), `DownloadManager`, `DownloadQueue`, `VoskModel` |
 | `stt/VoskTranscriber.java` | Audio → 16 kHz mono PCM via JAVE, Vosk recognition, timestamps |
-| `ui/` | `MainFrame` (drop zone, transcription, export, shortcuts), `ModelManagerDialog` |
-| `util/` | Preferences, audio info, network checks, `TranscriptExporter` |
+| `ui/` | `MainFrame` (drop zone, transcription, export, shortcuts), `ModelManagerDialog`, `ModelTableModel`, `ModelDownloadActions` |
+| `util/` | Preferences, audio info, network checks, `TranscriptExporter`, `ModelMigration` |
 
 Catalogue snapshot: `src/main/resources/atri/palaash/jvosk/models/model-list.json`.
 Tests: `src/test/java/...`; golden exports in `src/test/resources/golden/`.
@@ -58,12 +60,16 @@ Tests: `src/test/java/...`; golden exports in `src/test/resources/golden/`.
 4. Select a JAVE native binary per OS/architecture and retain platform-specific shaded jars.
 5. Resume partial HTTP downloads, display them in the Model Manager, and queue multiple downloads.
 
+6. Seed `.jvosk-install.json` for legacy installs from matching catalogue entries, without requiring a reinstall.
+7. Persist the download queue across restarts and resume remaining names after cancellation.
+8. Swing tests for update/reinstall labels, queue cancellation leftovers, and partial-download status.
+9. `jpackage` installers published from annotated signed `vX.Y.Z` tags.
+
 ## Suggested next tasks
 
-1. Add `jpackage` installers and publish release assets from signed version tags.
-2. Add Swing UI tests for update/reinstall, queue cancellation and partial-download status.
-3. Model/catalogue migration utility added (`ModelMigration.migrateLegacyModels`) for legacy installs.
-4. Consider resumable queue persistence across application restarts.
+1. Code-sign macOS/Windows installers so Gatekeeper and SmartScreen do not warn.
+2. Add a model/catalogue migration path for installs whose names are no longer in the catalogue.
+3. Profile streaming recognition on a Raspberry Pi Zero 2 W (see SLOPOS/PARAMA notes below).
 
 ## Git workflow
 

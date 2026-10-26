@@ -320,6 +320,44 @@ class ModelManagerTest {
     }
 
     @Test
+    void migrateLegacyInstallsSeedsCatalogueMetadataWithoutReinstall() throws IOException {
+        Path models = tempDir.resolve("models");
+        createValidModel(models.resolve("vosk-model-good"));
+        createValidModel(models.resolve(".jvosk-extract-123"));
+        Files.createDirectories(models.resolve("not-a-model"));
+        createValidModel(models.resolve("vosk-model-unknown"));
+
+        VoskModel catalogue = modelWithMetadata(
+                "vosk-model-good", "/good.zip", goodZip, "1.0", md5(goodZip));
+        ModelRegistry registry = new ModelRegistry(() -> List.of(catalogue), List::of);
+        ModelManager manager = new ModelManager(models.toString(), registry);
+
+        assertEquals(1, manager.migrateLegacyInstalls());
+        assertEquals(0, manager.migrateLegacyInstalls());
+        assertTrue(manager.getInstalledModelsWithoutUpdateMetadata().stream()
+                .allMatch(model -> model.getName().equals("vosk-model-unknown")));
+
+        Path metadata = models.resolve("vosk-model-good/.jvosk-install.json");
+        assertTrue(Files.isRegularFile(metadata));
+        String json = Files.readString(metadata);
+        assertTrue(json.contains("\"schemaVersion\" : 1") || json.contains("\"schemaVersion\":1"));
+        assertTrue(json.contains("vosk-model-good"));
+        assertFalse(Files.exists(models.resolve(".jvosk-extract-123/.jvosk-install.json")));
+        assertFalse(Files.exists(models.resolve("not-a-model/.jvosk-install.json")));
+        assertFalse(Files.exists(models.resolve("vosk-model-good/model-meta.json")));
+
+        ModelManager restarted = new ModelManager(models.toString(), registry);
+        VoskModel restored = restarted.getInstalledModels().stream()
+                .filter(model -> model.getName().equals("vosk-model-good"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("1.0", restored.getCatalogueVersion());
+        assertEquals(goodZip.length, restored.getSizeBytes());
+        assertEquals(md5(goodZip), restored.getChecksumMd5());
+        assertTrue(restarted.checkForUpdates().isEmpty());
+    }
+
+    @Test
     void keepsInstalledModelsThatAreNoLongerInCatalogue() throws IOException {
         Path models = tempDir.resolve("models");
         createValidModel(models.resolve("vosk-model-current"));

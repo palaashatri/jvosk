@@ -80,8 +80,7 @@ In priority order — each is something a user would notice:
 1. **Live transcription from the microphone.** Vosk is built for streaming recognition; show words as they are spoken.
 2. **Word-level timing and confidence:** highlight low-confidence words in the transcript and use word times for tighter SRT/VTT cues (Vosk returns both).
 3. **Batch transcription:** drop a folder, get a queue with per-file progress and one transcript per file.
-4. **A real 1.0.0 release:** publish user-facing release assets and `jpackage` installers; CI now builds and retains per-OS jars.
-5. **Update tracking for legacy installs:** old model folders predate persisted catalogue metadata. Reinstall them once to enable version/checksum/size comparisons.
+4. **A real 1.0.0 release:** cut an annotated signed tag (`git tag -s v1.0.0`); GitHub Actions builds per-OS jars and `jpackage` installers and publishes them as release assets. Native packages are unsigned.
 
 ### Recently completed
 
@@ -93,6 +92,10 @@ In priority order — each is something a user would notice:
 - Added cross-platform native model load/transcription integration tests with an attributed WAV fixture.
 - Added resumable HTTP Range downloads, partial-download status and sequential queueing in Model Manager.
 - Switched JAVE to OS/architecture-specific FFmpeg dependencies; the Windows shaded jar is about 56 MB (previous all-platform build: about 225 MB).
+- Seeded `.jvosk-install.json` for legacy model folders from matching catalogue entries (no reinstall required when the name is still listed).
+- Persisted the Model Manager download queue across restarts; cancelled queues can be resumed.
+- Added Swing tests for update/reinstall labels, queue cancellation leftovers and partial-download status.
+- Added a signed-tag release workflow that publishes `jpackage` installers.
 
 ## Quick Start
 
@@ -124,7 +127,7 @@ mvn -B verify
 mvn -B -Pintegration-tests verify
 ```
 
-The unit suite covers catalogue parsing and offline fallback, install metadata/update detection, archive integrity, resumable downloads, zip-slip protection, and golden-file exports. The integration profile downloads a small official English model, installs and loads it, then transcribes the attributed short WAV fixture. GitHub Actions runs the integration profile on Linux, macOS and Windows with JDK 17 and uploads a platform-specific shaded jar from each runner.
+The unit suite covers catalogue parsing and offline fallback, install metadata/update detection, legacy metadata migration, archive integrity, resumable downloads, persisted download queues, zip-slip protection, Model Manager update/reinstall/partial-download UI behaviour, and golden-file exports. The integration profile downloads a small official English model, installs and loads it, then transcribes the attributed short WAV fixture. GitHub Actions runs the integration profile on Linux, macOS and Windows with JDK 17 and uploads a platform-specific shaded jar from each runner. Annotated signed `vX.Y.Z` tags additionally build `jpackage` installers and publish a GitHub release.
 
 Refresh the bundled catalogue intentionally (Python 3 required), review the JSON diff, then commit it with the snapshot date:
 
@@ -188,7 +191,9 @@ Downloads are written to a resumable partial file and verified against the
 exact archive size and MD5 checksum from the catalogue before extraction.
 Select multiple models and choose **Queue Selected** for sequential downloads.
 Cancelled or interrupted transfers appear as **Partial** and resume when
-queued again. Large models show a confirmation prompt before downloading.
+queued again. Unfinished queues are written to
+`~/.jvosk/models/.jvosk-download-queue.json` and offered for resume the next
+time Model Manager opens. Large models show a confirmation prompt before downloading.
 
 ![Model Manager showing a partial download and multiple selections ready to queue](docs/screenshots/model-manager-queue.png)
 

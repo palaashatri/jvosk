@@ -302,6 +302,35 @@ public class ModelManager {
     }
 
     /**
+     * Write {@code .jvosk-install.json} for valid installed models that predate
+     * persistence, copying version, size and checksum from a matching catalogue
+     * entry. Staging/backup directories, unsafe names and invalid Vosk trees are
+     * ignored because {@link #scanInstalledModels()} never lists them. Existing
+     * metadata is left unchanged. Returns the number of files written.
+     */
+    public int migrateLegacyInstalls() throws IOException {
+        Map<String, VoskModel> catalogueByName = new HashMap<>();
+        for (VoskModel model : registry.fetchModels(false)) {
+            catalogueByName.put(model.getName(), model);
+        }
+
+        scanInstalledModels();
+        int written = 0;
+        for (VoskModel installed : getInstalledModelsWithoutUpdateMetadata()) {
+            VoskModel catalogueEntry = catalogueByName.get(installed.getName());
+            if (catalogueEntry == null) {
+                continue;
+            }
+            writeInstallMetadata(modelsDirectory.resolve(installed.getName()), catalogueEntry);
+            written++;
+        }
+        if (written > 0) {
+            scanInstalledModels();
+        }
+        return written;
+    }
+
+    /**
      * Return the names and current byte counts of resumable partial downloads.
      */
     public Map<String, Long> getPartialDownloads() throws IOException {

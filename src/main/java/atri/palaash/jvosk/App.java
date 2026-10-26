@@ -53,7 +53,7 @@ public class App {
             String modelsPath = userHome + File.separator + ".jvosk" + File.separator + "models";
             ModelManager modelManager = new ModelManager(modelsPath);
             
-            // Check for model updates in background
+            // Migrate legacy installs and check for updates off the EDT.
             checkForModelUpdates(modelManager);
             
             // Create and show main frame
@@ -70,6 +70,12 @@ public class App {
                 if (modelManager.getInstalledModels().isEmpty()) {
                     // No models installed - don't bother checking for updates
                     return;
+                }
+
+                try {
+                    modelManager.migrateLegacyInstalls();
+                } catch (IOException e) {
+                    System.err.println("Failed to migrate legacy model metadata: " + e.getMessage());
                 }
                 
                 // Small delay to let the UI appear first

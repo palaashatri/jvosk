@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-signed-tag:
+    name: Require annotated signed version tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify annotated PGP or SSH tag signature
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          TYPE="$(git cat-file -t "$TAG")"
+          if [ "$TYPE" != "tag" ]; then
+            echo "Release tags must be annotated (git tag -s vX.Y.Z), not lightweight."
+            exit 1
+          fi
+          if ! git cat-file -p "$TAG" | grep -Eq 'BEGIN (PGP|SSH) SIGNATURE'; then
+            echo "Release tag $TAG is annotated but not signed. Use git tag -s vX.Y.Z."
+            exit 1
+          fi
+          echo "Annotated signed tag $TAG accepted (signature blob present)."
+
+  package:
+    name: Package on ${{ matrix.os }}
+    needs: verify-signed-tag
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fakeroot
+
+      - name: Build shaded jar
+        run: mvn -B -ntp -DskipTests package
+
+      - name: Build jpackage assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          JAR="$(ls target/jvosk-*.jar | head -n 1)"
+          python scripts/package-release.py --jar "$JAR" --version "$VERSION" --dest dist
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvosk-${{ matrix.os }}
+          path: |
+            target/jvosk-*.jar
+            dist/*.deb
+            dist/*.rpm
+            dist/*.dmg
+            dist/*.msi
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: jvosk ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/**/*

@@ -1,18 +1,19 @@
 package atri.palaash.jvosk.ui;
 
 import atri.palaash.jvosk.models.DownloadManager;
+import atri.palaash.jvosk.models.DownloadQueue;
 import atri.palaash.jvosk.models.ModelManager;
 import atri.palaash.jvosk.models.VoskModel;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import java.awt.*;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
@@ -22,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 public class ModelManagerDialog extends JDialog {
     
     private final ModelManager modelManager;
+    private final DownloadQueue downloadQueue;
     private final JTable modelTable;
     private final ModelTableModel tableModel;
     private final JButton checkUpdatesButton;
@@ -39,10 +41,12 @@ public class ModelManagerDialog extends JDialog {
     private volatile boolean queueStopRequested;
     private volatile boolean queueRunning;
     private boolean controlsEnabled = true;
+    private boolean resumePromptShown;
     
     public ModelManagerDialog(Frame owner, ModelManager modelManager) {
         super(owner, "Model Manager", true);
         this.modelManager = modelManager;
+        this.downloadQueue = new DownloadQueue(modelManager.getModelsDirectory());
         
         setSize(1000, 600);
         setLocationRelativeTo(owner);
@@ -188,6 +192,7 @@ public class ModelManagerDialog extends JDialog {
                             models.stream().filter(VoskModel::isInstalled).count(),
                             bundled ? " - bundled catalogue (offline)" : ""));
                     setButtonsEnabled(true);
+                    maybeResumePersistedQueue(models);
                 });
 
             } catch (IOException e) {
@@ -301,8 +306,40 @@ public class ModelManagerDialog extends JDialog {
     }
 
     private boolean isDownloadCandidate(VoskModel model) {
-        return !model.isInstalled() || updatesAvailable.contains(model.getName())
-                || metadataMissing.contains(model.getName());
+        return ModelDownloadActions.isDownloadCandidate(model, updatesAvailable, metadataMissing);
+    }
+
+    private void maybeResumePersistedQueue(List<VoskModel> models) {
+        List<String> pending = downloadQueue.remaining();
+        if (pending.isEmpty() || queueRunning || resumePromptShown) {
+            return;
+        }
+        resumePromptShown = true;
+        Map<String, VoskModel> byName = new java.util.LinkedHashMap<>();
+        for (VoskModel model : models) {
+            byName.put(model.getName(), model);
+        }
+        List<VoskModel> resume = pending.stream()
+                .map(byName::get)
+                .filter(Objects::nonNull)
+                .filter(this::isDownloadCandidate)
+                .distinct()
+                .toList();
+        if (resume.isEmpty()) {
+            try {
+                downloadQueue.clear();
+            } catch (IOException e) {
+                System.err.println("Failed to clear stale download queue: " + e.getMessage());
+            }
+            return;
+        }
+        int result = JOptionPane.showConfirmDialog(this,
+                String.format("%d queued download(s) were left unfinished.%nResume them now?", resume.size()),
+                "Resume Download Queue",
+                JOptionPane.YES_NO_OPTION);
+        if (result == JOptionPane.YES_OPTION) {
+            queueModels(resume);
+        }
     }
 
     private void queueModels(List<VoskModel> requestedModels) {
@@ -333,6 +370,11 @@ public class ModelManagerDialog extends JDialog {
         downloadProgress.setVisible(true);
         downloadProgress.setValue(0);
         cancelDownloadButton.setVisible(true);
+        try {
+            downloadQueue.setPending(models.stream().map(VoskModel::getName).toList());
+        } catch (IOException e) {
+            statusLabel.setText("Could not persist download queue: " + e.getMessage());
+        }
 
         CompletableFuture.runAsync(() -> {
             List<String> failures = new ArrayList<>();
@@ -360,6 +402,11 @@ public class ModelManagerDialog extends JDialog {
                     }));
                     activeDownload.complete(null);
                     completed++;
+                    try {
+                        downloadQueue.markCompleted(downloadingName);
+                    } catch (IOException persistError) {
+                        System.err.println("Failed to persist queue progress: " + persistError.getMessage());
+                    }
                     SwingUtilities.invokeLater(() -> removeAvailableUpdate(downloadingName));
                 } catch (IOException | RuntimeException e) {
                     activeDownload.completeExceptionally(e);
@@ -396,6 +443,13 @@ public class ModelManagerDialog extends JDialog {
     private void finishDownloadQueue(int requested, int completed, List<String> failures, boolean stopped) {
         queueRunning = false;
         queueStopRequested = false;
+        if (!stopped && downloadQueue.isEmpty()) {
+            try {
+                downloadQueue.clear();
+            } catch (IOException e) {
+                System.err.println("Failed to clear finished download queue: " + e.getMessage());
+            }
+        }
         if (!isDisplayable()) {
             return;
         }
@@ -529,12 +583,9 @@ public class ModelManagerDialog extends JDialog {
 
         if (singleSelection) {
             VoskModel model = tableModel.getModel(selectedRows[0]);
-            boolean updateAvailable = model.isInstalled() && updatesAvailable.contains(model.getName());
-            boolean needsMetadata = model.isInstalled() && metadataMissing.contains(model.getName());
             boolean partial = tableModel.hasPartialDownload(model.getName());
-            downloadButton.setText(updateAvailable ? "Update Model"
-                    : needsMetadata ? "Reinstall Model"
-                    : partial ? "Resume Download" : "Download Model");
+            downloadButton.setText(ModelDownloadActions.downloadButtonText(
+                    model, updatesAvailable, metadataMissing, partial));
             downloadButton.setEnabled(isDownloadCandidate(model));
             deleteButton.setEnabled(model.isInstalled());
             useButton.setEnabled(model.isInstalled());
@@ -566,70 +617,6 @@ public class ModelManagerDialog extends JDialog {
     
     public VoskModel getSelectedModel() {
         return selectedModel;
-    }
-    
-    // Table Model
-    private static class ModelTableModel extends AbstractTableModel {
-        private final String[] columnNames = {"Name", "Language", "Size", "Type", "Status", "Description"};
-        private List<VoskModel> models = new ArrayList<>();
-        private Map<String, Long> partialDownloads = Map.of();
-        
-        public void setModels(List<VoskModel> models, Map<String, Long> partialDownloads) {
-            this.models = new ArrayList<>(models);
-            this.partialDownloads = Map.copyOf(partialDownloads);
-            fireTableDataChanged();
-        }
-
-        public boolean hasPartialDownload(String modelName) {
-            return partialDownloads.containsKey(modelName);
-        }
-        
-        public VoskModel getModel(int row) {
-            return models.get(row);
-        }
-        
-        @Override
-        public int getRowCount() {
-            return models.size();
-        }
-        
-        @Override
-        public int getColumnCount() {
-            return columnNames.length;
-        }
-        
-        @Override
-        public String getColumnName(int column) {
-            return columnNames[column];
-        }
-        
-        @Override
-        public Object getValueAt(int rowIndex, int columnIndex) {
-            VoskModel model = models.get(rowIndex);
-            
-            return switch (columnIndex) {
-                case 0 -> model.getName();
-                case 1 -> model.getLanguage();
-                case 2 -> model.getSize();
-                case 3 -> model.getType().toString();
-                case 4 -> {
-                    Long partialSize = partialDownloads.get(model.getName());
-                    if (model.isInstalled()) {
-                        yield "Installed";
-                    }
-                    if (partialSize == null) {
-                        yield "Available";
-                    }
-                    if (model.getSizeBytes() > 0) {
-                        long percent = Math.min(99, partialSize * 100 / model.getSizeBytes());
-                        yield String.format("Partial (%d%%)", percent);
-                    }
-                    yield "Partial";
-                }
-                case 5 -> model.getDescription();
-                default -> "";
-            };
-        }
     }
     
     // Status cell renderer
