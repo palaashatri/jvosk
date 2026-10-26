@@ -77,6 +77,18 @@ public class App {
                 } catch (IOException e) {
                     System.err.println("Failed to migrate legacy model metadata: " + e.getMessage());
                 }
+
+                try {
+                    Map<String, String> adopted = modelManager.migrateCatalogueRenames();
+                    if (!adopted.isEmpty()) {
+                        AppPreferences.remapSelectedModel(modelManager.getModelsDirectory(), adopted);
+                    }
+                    adopted.forEach((oldName, newName) ->
+                            System.out.println("Adopted catalogue name for installed model: "
+                                    + oldName + " -> " + newName));
+                } catch (IOException e) {
+                    System.err.println("Failed to adopt catalogue renames: " + e.getMessage());
+                }
                 
                 // Small delay to let the UI appear first
                 Thread.sleep(2000);

@@ -180,30 +180,36 @@ public class MainFrame extends JFrame {
                 String modelPath = AppPreferences.getSelectedModel();
                 try {
                     this.transcriber = new VoskTranscriber(modelPath);
-                    applyEnhanceSpeech();
                 } catch (Exception e) {
-                    // Try default model location
-                    File modelDir = new File("models/vosk-model-small-en-us-0.15");
-                    if (modelDir.exists()) {
-                        this.transcriber = new VoskTranscriber(modelDir.getAbsolutePath());
-                        applyEnhanceSpeech();
-                        AppPreferences.setSelectedModel(modelDir.getAbsolutePath());
+                    // A checksum-verified catalogue rename can move the selected
+                    // folder while this thread starts. Retry the updated path.
+                    String updatedPath = AppPreferences.getSelectedModel();
+                    if (!updatedPath.equals(modelPath) && new File(updatedPath).isDirectory()) {
+                        this.transcriber = new VoskTranscriber(updatedPath);
                     } else {
-                        // No model found
-                        this.transcriber = null;
-                        SwingUtilities.invokeLater(() -> {
-                            setStatus("No speech model found");
-                            progressBar.setVisible(false);
-                            JOptionPane.showMessageDialog(MainFrame.this,
-                                    "No speech model found. Please download a model first.\n\n" +
-                                    "Opening Model Manager...",
-                                    "Model Required",
-                                    JOptionPane.WARNING_MESSAGE);
-                            openModelManager();
-                        });
-                        return;
+                        // Try default model location
+                        File modelDir = new File("models/vosk-model-small-en-us-0.15");
+                        if (modelDir.exists()) {
+                            this.transcriber = new VoskTranscriber(modelDir.getAbsolutePath());
+                            AppPreferences.setSelectedModel(modelDir.getAbsolutePath());
+                        } else {
+                            // No model found
+                            this.transcriber = null;
+                            SwingUtilities.invokeLater(() -> {
+                                setStatus("No speech model found");
+                                progressBar.setVisible(false);
+                                JOptionPane.showMessageDialog(MainFrame.this,
+                                        "No speech model found. Please download a model first.\n\n" +
+                                        "Opening Model Manager...",
+                                        "Model Required",
+                                        JOptionPane.WARNING_MESSAGE);
+                                openModelManager();
+                            });
+                            return;
+                        }
                     }
                 }
+                applyEnhanceSpeech();
                 
                 // Model loaded successfully
                 SwingUtilities.invokeLater(() -> {

@@ -4,6 +4,7 @@ import atri.palaash.jvosk.models.DownloadManager;
 import atri.palaash.jvosk.models.DownloadQueue;
 import atri.palaash.jvosk.models.ModelManager;
 import atri.palaash.jvosk.models.VoskModel;
+import atri.palaash.jvosk.util.AppPreferences;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -88,7 +89,7 @@ public class ModelManagerDialog extends JDialog {
         modelTable.getColumnModel().getColumn(1).setPreferredWidth(100); // Language
         modelTable.getColumnModel().getColumn(2).setPreferredWidth(80);  // Size
         modelTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Type
-        modelTable.getColumnModel().getColumn(4).setPreferredWidth(80);  // Status
+        modelTable.getColumnModel().getColumn(4).setPreferredWidth(150); // Status
         modelTable.getColumnModel().getColumn(5).setPreferredWidth(200); // Description
         
         // Custom renderer for status column
@@ -181,17 +182,35 @@ public class ModelManagerDialog extends JDialog {
         CompletableFuture.runAsync(() -> {
             try {
                 List<VoskModel> models = modelManager.getAvailableModels(forceRefresh);
+                Map<String, String> adopted;
+                try {
+                    adopted = modelManager.migrateCatalogueRenames(models);
+                    if (!adopted.isEmpty()) {
+                        AppPreferences.remapSelectedModel(modelManager.getModelsDirectory(), adopted);
+                    }
+                } catch (IOException e) {
+                    System.err.println("Failed to adopt catalogue renames: " + e.getMessage());
+                    adopted = Map.of();
+                }
+                if (!adopted.isEmpty()) {
+                    models = modelManager.getAvailableModels(false);
+                }
                 Map<String, Long> partials = modelManager.getPartialDownloads();
+                List<VoskModel> loadedModels = models;
+                String adoptedNote = adopted.isEmpty()
+                        ? ""
+                        : String.format(" - adopted %d catalogue rename(s)", adopted.size());
 
                 SwingUtilities.invokeLater(() -> {
-                    tableModel.setModels(models, partials);
+                    tableModel.setModels(loadedModels, partials, catalogueNames(loadedModels));
                     boolean bundled = modelManager.isUsingFallbackCatalogue();
-                    statusLabel.setText(String.format("Found %d models (%d installed)%s",
-                            models.size(),
-                            models.stream().filter(VoskModel::isInstalled).count(),
-                            bundled ? " - bundled catalogue (offline)" : ""));
+                    statusLabel.setText(String.format("Found %d models (%d installed)%s%s",
+                            loadedModels.size(),
+                            loadedModels.stream().filter(VoskModel::isInstalled).count(),
+                            bundled ? " - bundled catalogue (offline)" : "",
+                            adoptedNote));
                     setButtonsEnabled(true);
-                    maybeResumePersistedQueue(models);
+                    maybeResumePersistedQueue(loadedModels);
                 });
 
             } catch (IOException e) {
@@ -202,6 +221,13 @@ public class ModelManagerDialog extends JDialog {
                 });
             }
         });
+    }
+
+    private static Set<String> catalogueNames(List<VoskModel> models) {
+        return models.stream()
+                .filter(ModelDownloadActions::hasDownloadSource)
+                .map(VoskModel::getName)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
     
     /**
@@ -225,16 +251,23 @@ public class ModelManagerDialog extends JDialog {
         CompletableFuture.runAsync(() -> {
             try {
                 Map<String, VoskModel> updates = modelManager.checkForUpdates();
+                Set<String> catalogueNames = catalogueNames(modelManager.getAvailableModels(false));
                 Set<String> unverified = modelManager.getInstalledModelsWithoutUpdateMetadata().stream()
                         .map(VoskModel::getName)
+                        .filter(catalogueNames::contains)
                         .collect(java.util.stream.Collectors.toUnmodifiableSet());
-                
+                List<String> orphaned = modelManager.getInstalledModels().stream()
+                        .map(VoskModel::getName)
+                        .filter(name -> !catalogueNames.contains(name))
+                        .sorted()
+                        .toList();
+
                 SwingUtilities.invokeLater(() -> {
                     updatesAvailable = Set.copyOf(updates.keySet());
                     metadataMissing = unverified;
                     setButtonsEnabled(true);
-                    
-                    if (updates.isEmpty() && unverified.isEmpty()) {
+
+                    if (updates.isEmpty() && unverified.isEmpty() && orphaned.isEmpty()) {
                         statusLabel.setText("All models are up to date");
                         JOptionPane.showMessageDialog(this,
                                 "All installed models are up to date!",
@@ -244,8 +277,11 @@ public class ModelManagerDialog extends JDialog {
                         String updateLabel = updates.size() == 1 ? "update" : "updates";
                         String installationLabel = unverified.size() == 1 ? "installation" : "installations";
                         String verificationVerb = unverified.size() == 1 ? "needs" : "need";
-                        statusLabel.setText(String.format("%d %s; %d %s %s verification",
-                                updates.size(), updateLabel, unverified.size(), installationLabel, verificationVerb));
+                        String orphanLabel = orphaned.size() == 1 ? "install" : "installs";
+                        statusLabel.setText(String.format("%d %s; %d %s %s verification; %d %s not in catalogue",
+                                updates.size(), updateLabel,
+                                unverified.size(), installationLabel, verificationVerb,
+                                orphaned.size(), orphanLabel));
 
                         StringBuilder message = new StringBuilder();
                         if (!updates.isEmpty()) {
@@ -257,16 +293,28 @@ public class ModelManagerDialog extends JDialog {
                             unverified.forEach(name -> message.append("- ").append(name).append("\n"));
                             message.append("Reinstall them once to enable reliable update checks.\n");
                         }
+                        if (!orphaned.isEmpty()) {
+                            message.append("\nThese installed models are no longer in the catalogue and cannot be updated:\n");
+                            orphaned.forEach(name -> message.append("- ").append(name).append("\n"));
+                            message.append("Delete them or choose a current catalogue model to install.\n");
+                        }
 
-                        int result = JOptionPane.showConfirmDialog(this,
-                                message + "\nWould you like to update/reinstall these models now?",
-                                "Model Verification",
-                                JOptionPane.YES_NO_OPTION);
-                        
-                        if (result == JOptionPane.YES_OPTION) {
+                        if (!updates.isEmpty() || !unverified.isEmpty()) {
+                            int result = JOptionPane.showConfirmDialog(this,
+                                    message + "\nWould you like to update/reinstall these models now?",
+                                    "Model Verification",
+                                    JOptionPane.YES_NO_OPTION);
+
+                            if (result == JOptionPane.YES_OPTION) {
+                                JOptionPane.showMessageDialog(this,
+                                        "Select a listed model and choose Update/Reinstall, or add it to the queue.",
+                                        "Info",
+                                        JOptionPane.INFORMATION_MESSAGE);
+                            }
+                        } else {
                             JOptionPane.showMessageDialog(this,
-                                    "Select a listed model and choose Update/Reinstall, or add it to the queue.",
-                                    "Info",
+                                    message.toString(),
+                                    "Catalogue Status",
                                     JOptionPane.INFORMATION_MESSAGE);
                         }
                     }

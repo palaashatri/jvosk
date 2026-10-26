@@ -16,9 +16,21 @@ public final class ModelDownloadActions {
     public static boolean isDownloadCandidate(VoskModel model,
                                               Set<String> updatesAvailable,
                                               Set<String> metadataMissing) {
-        return !model.isInstalled()
+        return hasDownloadSource(model)
+                && (!model.isInstalled()
                 || updatesAvailable.contains(model.getName())
-                || metadataMissing.contains(model.getName());
+                || metadataMissing.contains(model.getName()));
+    }
+
+    /**
+     * Whether a row has a real catalogue archive to download. Locally installed
+     * models that disappeared from the catalogue use an {@code installed://}
+     * placeholder and must not offer a reinstall action.
+     */
+    public static boolean hasDownloadSource(VoskModel model) {
+        String url = model.getDownloadUrl();
+        return url != null
+                && (url.startsWith("https://") || url.startsWith("http://"));
     }
 
     public static String downloadButtonText(VoskModel model,

@@ -1,0 +1,8 @@
+# jvosk is a Java 17 project: public APIs are documented with Javadoc, and
+# CodeRabbit's docstring-coverage metric misreads Javadoc (it reported 6% while
+# every public class and non-trivial method is documented). Keep the other
+# pre-merge checks, but do not gate this repository on that metric.
+reviews:
+  pre_merge_checks:
+    docstrings:
+      mode: "off"

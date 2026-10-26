@@ -34,6 +34,18 @@ class ModelManagerUiTest {
     }
 
     @Test
+    void tableDistinguishesInstalledModelsOutsideTheCatalogue() {
+        VoskModel orphan = installedWithoutDownloadSource("vosk-model-orphan");
+        ModelTableModel tableModel = new ModelTableModel();
+        tableModel.setModels(List.of(orphan), Map.of(), Set.of("vosk-model-current"));
+
+        assertEquals("Installed (not in catalogue)", tableModel.getValueAt(0, 4));
+        assertFalse(ModelDownloadActions.isDownloadCandidate(
+                orphan, Set.of(orphan.getName()), Set.of(orphan.getName())),
+                "A model without a catalogue archive must not offer reinstall");
+    }
+
+    @Test
     void downloadButtonUsesUpdateReinstallAndResumeLabels() {
         VoskModel installed = model("vosk-model-installed", true, 100);
         VoskModel downloading = model("vosk-model-partial", false, 100);
@@ -83,6 +95,20 @@ class ModelManagerUiTest {
                 .type(VoskModel.ModelType.SMALL)
                 .isInstalled(installed)
                 .installedVersion(installed ? "1" : null)
+                .build();
+    }
+
+    private static VoskModel installedWithoutDownloadSource(String name) {
+        return new VoskModel.Builder()
+                .name(name)
+                .language("English")
+                .size("Unknown")
+                .sizeBytes(0)
+                .description("test")
+                .downloadUrl("installed://local")
+                .type(VoskModel.ModelType.SMALL)
+                .isInstalled(true)
+                .installedVersion(name)
                 .build();
     }
 }

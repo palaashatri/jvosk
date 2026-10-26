@@ -6,6 +6,7 @@ import javax.swing.table.AbstractTableModel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Table model for the Model Manager: catalogue rows plus partial-download
@@ -15,10 +16,27 @@ public final class ModelTableModel extends AbstractTableModel {
     private final String[] columnNames = {"Name", "Language", "Size", "Type", "Status", "Description"};
     private List<VoskModel> models = new ArrayList<>();
     private Map<String, Long> partialDownloads = Map.of();
+    private Set<String> catalogueNames;
 
     public void setModels(List<VoskModel> models, Map<String, Long> partialDownloads) {
+        setModels(models, partialDownloads, null);
+    }
+
+    /**
+     * Populate the table and optionally distinguish installed models that are
+     * no longer present in the current catalogue.
+     *
+     * @param models rows to display
+     * @param partialDownloads partial byte counts keyed by model name
+     * @param catalogueNames names in the current catalogue, or {@code null} to
+     *                       skip the orphaned-model status
+     */
+    public void setModels(List<VoskModel> models,
+                          Map<String, Long> partialDownloads,
+                          Set<String> catalogueNames) {
         this.models = new ArrayList<>(models);
         this.partialDownloads = Map.copyOf(partialDownloads);
+        this.catalogueNames = catalogueNames == null ? null : Set.copyOf(catalogueNames);
         fireTableDataChanged();
     }
 
@@ -63,6 +81,9 @@ public final class ModelTableModel extends AbstractTableModel {
     private String statusFor(VoskModel model) {
         Long partialSize = partialDownloads.get(model.getName());
         if (model.isInstalled()) {
+            if (catalogueNames != null && !catalogueNames.contains(model.getName())) {
+                return "Installed (not in catalogue)";
+            }
             return "Installed";
         }
         if (partialSize == null) {

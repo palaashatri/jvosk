@@ -21,6 +21,8 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
 - **Verified Downloads**: Exact size and MD5 checks before a model is installed
 - **Resume and Queue**: Interrupted downloads retain partial bytes; queue several models and see partial progress
 - **Real Update Checks**: Saved catalogue version, archive size and checksum are compared against the latest catalogue
+- **Catalogue Rename Adoption**: A checksum-verified install whose folder was renamed upstream is moved to the current catalogue name automatically
+- **Honest Orphan Status**: Installs that left the catalogue show **Installed (not in catalogue)** instead of a broken reinstall action
 - **Easy Switching**: Switch between models on the fly
 - **Smart Downloads**: 
   - Small models for quick downloads
@@ -39,6 +41,14 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
 - **Speech enhance**: optional View-menu filter (speech-band high/low-pass + loudness normalize) to reduce music/noise before recognition
 - **Drag & Drop**: Drag audio or video files into the app
 - **File Browser**: Standard file picker with format filtering
+
+![Transcribing an MP4 video with the bundled JAVE FFmpeg](docs/screenshots/transcript-video.png)
+
+*An MP4 video is converted and transcribed offline; the status line reports the model and completion time.*
+
+![View menu with Enhance Speech enabled](docs/screenshots/enhance-speech.png)
+
+*Optional speech-band filtering is toggled from the View menu before transcription.*
 
 ### Transcription
 - **Offline Processing**: No internet required, privacy-first
@@ -98,6 +108,7 @@ In priority order — each is something a user would notice:
 - Added Swing tests for update/reinstall labels, queue cancellation leftovers and partial-download status.
 - Added a signed-tag release workflow that publishes `jpackage` installers.
 - Video files (MP4/MKV/MOV/WEBM/AVI) transcribe through bundled JAVE FFmpeg; optional **Enhance Speech** filters music/noise.
+- Adopted catalogue renames for checksum-verified installs and marked installs that left the catalogue as **Installed (not in catalogue)**.
 
 ## Quick Start
 
@@ -197,9 +208,13 @@ queued again. Unfinished queues are written to
 `~/.jvosk/models/.jvosk-download-queue.json` and offered for resume the next
 time Model Manager opens. Large models show a confirmation prompt before downloading.
 
-![Model Manager showing a partial download and multiple selections ready to queue](docs/screenshots/model-manager-queue.png)
+![Model Manager showing a partial download and resume actions](docs/screenshots/model-manager-partial.png)
 
-*Select several models to queue them sequentially; interrupted downloads remain visible with their partial progress.*
+*Interrupted transfers stay visible as **Partial (29%)** with **Resume Download** enabled; the status column names the exact partial percentage.*
+
+![Resume download queue prompt after restarting the app](docs/screenshots/model-manager-queue.png)
+
+*Unfinished queues survive restarts and are offered for resume the next time Model Manager opens.*
 
 ### Switching Models
 
@@ -217,16 +232,24 @@ time Model Manager opens. Large models show a confirmation prompt before downloa
 
 - **Check for Updates** compares persisted catalogue version, checksum and
   exact archive size against the current catalogue.
+- Catalogue renames are adopted automatically. If an installed folder is no
+  longer in the catalogue but its saved checksum matches exactly one catalogue
+  archive (and that name is free), the folder is moved to the catalogue name and
+  its metadata is rewritten. Ambiguous, missing or mismatched checksums are
+  never moved.
 - Legacy folders get a `.jvosk-install.json` stub on startup so they are
   recognised, but catalogue version/size/checksum are not copied from the
   name. A reinstall is still required before update checks can trust them.
+- Installed models that left the catalogue are marked **Installed (not in
+  catalogue)**. They can still be used or deleted, but no reinstall or update
+  is offered because there is no catalogue archive to download.
 - Updates are never applied automatically. Select an updated model and choose
   **Update Model**, or add it to the queue. Staged installation keeps the old
   model unless the new archive verifies and extracts successfully.
 
-![Update check showing a catalogue update and a legacy installation that needs verification](docs/screenshots/model-manager-update-check.png)
+![Update check listing a catalogue update and an install that left the catalogue](docs/screenshots/model-manager-update-check.png)
 
-*Update checks distinguish catalogue changes from older installs that still need a reinstall because they are no longer in the catalogue.*
+*Update checks report catalogue updates separately from installs the catalogue no longer lists.*
 
 ![An installed model with an update available](docs/screenshots/model-manager-update.png)
 
@@ -234,7 +257,15 @@ time Model Manager opens. Large models show a confirmation prompt before downloa
 
 ![A legacy installation offered for one-time reinstall](docs/screenshots/model-manager-reinstall.png)
 
-*Choose **Reinstall Model** only when the folder name is not in the current catalogue.*
+*An installed model that is still in the catalogue but has no saved checksum offers **Reinstall Model**.*
+
+![An installed model that is no longer in the catalogue](docs/screenshots/model-manager-orphan.png)
+
+*Installs the catalogue no longer lists are labelled **Installed (not in catalogue)**; only Delete and Use remain.*
+
+![A checksum-verified catalogue rename adopted on load](docs/screenshots/model-manager-rename.png)
+
+*A folder renamed upstream is moved to the new catalogue name and reported in the status line.*
 
 ### Deleting Models
 

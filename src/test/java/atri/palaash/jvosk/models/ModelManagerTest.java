@@ -403,6 +403,97 @@ class ModelManagerTest {
     }
 
     @Test
+    void adoptsChecksumVerifiedCatalogueRename() throws IOException {
+        Path models = tempDir.resolve("models");
+        createValidModel(models.resolve("vosk-model-old"));
+        Files.writeString(models.resolve("vosk-model-old/.jvosk-install.json"),
+                installMetadataJson("vosk-model-old", "1.0", goodZip.length, md5(goodZip)));
+
+        VoskModel renamed = modelWithMetadata(
+                "vosk-model-new", "/good.zip", goodZip, "2.0", md5(goodZip));
+        ModelRegistry registry = new ModelRegistry(() -> List.of(renamed), List::of);
+        ModelManager manager = new ModelManager(models.toString(), registry);
+
+        Map<String, VoskModel> candidates = manager.findCatalogueRenames(List.of(renamed));
+        assertEquals(List.of("vosk-model-old"), List.copyOf(candidates.keySet()));
+        assertEquals("vosk-model-new", candidates.get("vosk-model-old").getName());
+
+        // Model Manager calls this with getAvailableModels(), which appends the
+        // orphaned installed row itself. That row must not mask the rename.
+        List<VoskModel> merged = new ArrayList<>(List.of(renamed));
+        merged.addAll(manager.getInstalledModels());
+        assertEquals(List.of("vosk-model-old"),
+                List.copyOf(manager.findCatalogueRenames(merged).keySet()));
+
+        Map<String, String> migrated = manager.migrateCatalogueRenames(merged);
+
+        assertEquals(Map.of("vosk-model-old", "vosk-model-new"), migrated);
+        assertFalse(Files.exists(models.resolve("vosk-model-old")));
+        assertTrue(Files.isRegularFile(models.resolve("vosk-model-new/am/final.mdl")));
+
+        String metadata = Files.readString(models.resolve("vosk-model-new/.jvosk-install.json"));
+        assertTrue(metadata.contains("vosk-model-new"));
+        assertTrue(metadata.contains("2.0"));
+        assertTrue(metadata.contains(md5(goodZip)));
+        assertEquals(List.of("vosk-model-new"), manager.getInstalledModels().stream()
+                .map(VoskModel::getName).toList());
+        assertTrue(manager.getInstalledModelsWithoutUpdateMetadata().isEmpty());
+        assertTrue(manager.checkForUpdates().isEmpty());
+
+        ModelManager restarted = new ModelManager(models.toString(), registry);
+        VoskModel installed = restarted.getInstalledModels().get(0);
+        assertEquals("vosk-model-new", installed.getName());
+        assertEquals("2.0", installed.getCatalogueVersion());
+        assertEquals(md5(goodZip), installed.getChecksumMd5());
+    }
+
+    @Test
+    void refusesCatalogueRenameWithoutVerifiedOrUnambiguousChecksum() throws IOException {
+        Path models = tempDir.resolve("models");
+        createValidModel(models.resolve("vosk-model-no-metadata"));
+        createValidModel(models.resolve("vosk-model-unknown-checksum"));
+        Files.writeString(models.resolve("vosk-model-unknown-checksum/.jvosk-install.json"),
+                installMetadataJson("vosk-model-unknown-checksum", "1.0", goodZip.length, md5(goodZip)));
+
+        VoskModel catalogue = modelWithMetadata(
+                "vosk-model-current", "/good.zip", goodZip, "2.0", md5(tampered(goodZip)));
+        VoskModel ambiguousA = modelWithMetadata(
+                "vosk-model-a", "/good.zip", goodZip, "2.0", md5(goodZip));
+        VoskModel ambiguousB = modelWithMetadata(
+                "vosk-model-b", "/good.zip", goodZip, "2.0", md5(goodZip));
+        ModelRegistry registry = new ModelRegistry(
+                () -> List.of(catalogue, ambiguousA, ambiguousB), List::of);
+        ModelManager manager = new ModelManager(models.toString(), registry);
+
+        assertTrue(manager.findCatalogueRenames(List.of(catalogue, ambiguousA, ambiguousB)).isEmpty());
+        assertTrue(manager.migrateCatalogueRenames(List.of(catalogue, ambiguousA, ambiguousB)).isEmpty());
+        assertTrue(Files.isDirectory(models.resolve("vosk-model-no-metadata")));
+        assertTrue(Files.isDirectory(models.resolve("vosk-model-unknown-checksum")));
+        assertFalse(Files.exists(models.resolve("vosk-model-a")));
+
+        createValidModel(models.resolve("vosk-model-occupied"));
+        VoskModel occupied = modelWithMetadata(
+                "vosk-model-occupied", "/good.zip", goodZip, "2.0", md5(goodZip));
+        createValidModel(models.resolve("vosk-model-old"));
+        Files.writeString(models.resolve("vosk-model-old/.jvosk-install.json"),
+                installMetadataJson("vosk-model-old", "1.0", goodZip.length, md5(goodZip)));
+        ModelManager collision = new ModelManager(models.toString(),
+                new ModelRegistry(() -> List.of(occupied), List::of));
+
+        assertTrue(collision.findCatalogueRenames(List.of(occupied)).isEmpty());
+        assertTrue(Files.isDirectory(models.resolve("vosk-model-old")));
+        assertTrue(Files.isDirectory(models.resolve("vosk-model-occupied")));
+    }
+
+    private static String installMetadataJson(String name, String version,
+                                              long sizeBytes, String checksum) {
+        return String.format(
+                "{\"schemaVersion\":1,\"modelName\":\"%s\",\"catalogueVersion\":\"%s\","
+                        + "\"archiveSizeBytes\":%d,\"checksumMd5\":\"%s\"}",
+                name, version, sizeBytes, checksum);
+    }
+
+    @Test
     void refusesNonHttpDownloadUrls() throws IOException {
         ModelManager manager = new ModelManager(tempDir.resolve("models").toString());
         VoskModel model = new VoskModel.Builder()

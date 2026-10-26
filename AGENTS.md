@@ -8,7 +8,8 @@ jvosk is a Java 17 Swing desktop app for offline speech-to-text with [Vosk](http
 - **JUnit 5 suite and GitHub Actions CI.** Unit tests run with `mvn -B verify`; CI also runs `mvn -B -Pintegration-tests verify` on Linux, macOS and Windows, then retains each platform's shaded jar.
 - The model catalogue comes from Vosk's official `model-list.json`, parsed with Jackson. A bundled snapshot is used when fetching/parsing fails and can be refreshed with `python scripts/update-model-catalogue.py`.
 - New installs persist catalogue version, archive size and checksum for real update checks. Downloads resume via HTTP Range, can be queued in the Model Manager, and are verified before staged extraction/rollback-safe installation. Zip-slip protection remains enabled.
-- **Known limitations:** snapshot refreshes are manual; installs whose names are no longer in the catalogue still cannot get update metadata without a reinstall; native `jpackage` installers are unsigned.
+- Startup and Model Manager load adopt catalogue renames for installs whose saved checksum matches exactly one current archive. Installs that left the catalogue are labelled **Installed (not in catalogue)** and are not offered a reinstall.
+- **Known limitations:** snapshot refreshes are manual; installs that left the catalogue cannot be updated; native `jpackage` installers are unsigned.
 
 ## Commands
 
@@ -60,16 +61,18 @@ Tests: `src/test/java/...`; golden exports in `src/test/resources/golden/`.
 4. Select a JAVE native binary per OS/architecture and retain platform-specific shaded jars.
 5. Resume partial HTTP downloads, display them in the Model Manager, and queue multiple downloads.
 
-6. Seed `.jvosk-install.json` for legacy installs from matching catalogue entries, without requiring a reinstall.
+6. Seed `.jvosk-install.json` stubs for legacy installs without copying unverified catalogue identity from the folder name.
 7. Persist the download queue across restarts and resume remaining names after cancellation.
 8. Swing tests for update/reinstall labels, queue cancellation leftovers, and partial-download status.
 9. `jpackage` installers published from annotated signed `vX.Y.Z` tags.
+10. Adopt checksum-verified catalogue renames on startup and Model Manager load, with rollback if metadata cannot be written.
+11. Label installs that left the catalogue as **Installed (not in catalogue)** and suppress the broken reinstall action.
 
 ## Suggested next tasks
 
-1. Code-sign macOS/Windows installers so Gatekeeper and SmartScreen do not warn.
-2. Add a model/catalogue migration path for installs whose names are no longer in the catalogue.
-3. Profile streaming recognition on a Raspberry Pi Zero 2 W (see SLOPOS/PARAMA notes below).
+1. **BLOCKED:** Code-sign macOS/Windows installers so Gatekeeper and SmartScreen do not warn. Requires an Apple Developer ID certificate, a Windows EV/OV certificate and CI secrets; unsigned installers remain published.
+2. **DONE (2026-10-26):** Add a model/catalogue migration path for installs whose names are no longer in the catalogue. Renames are adopted only when the saved checksum matches exactly one catalogue archive; unverified installs are left in place.
+3. **NOT_RUN:** Profile streaming recognition on a Raspberry Pi Zero 2 W (see SLOPOS/PARAMA notes below). No physical hardware is available; QEMU/container results would not satisfy the device-acceptance rules.
 
 ## Git workflow
 

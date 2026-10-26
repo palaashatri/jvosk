@@ -8,10 +8,10 @@ import java.nio.file.Path;
 
 /**
  * Seeds {@code .jvosk-install.json} for valid Vosk model directories that were
- * installed before metadata persistence. Catalogue fields are copied from a
- * matching catalogue entry so {@link ModelManager} can track updates without a
- * reinstall. Existing metadata, staging/backup directories and invalid models
- * are left unchanged.
+ * installed before metadata persistence. Only the schema version and model name
+ * are recorded; catalogue version, size and checksum stay unset until a verified
+ * install, so a matching directory name is never treated as current. Existing
+ * metadata, staging/backup directories and invalid models are left unchanged.
  */
 public final class ModelMigration {
     private ModelMigration() {}
