@@ -5,6 +5,7 @@ import atri.palaash.jvosk.models.VoskModel;
 import atri.palaash.jvosk.stt.VoskTranscriber;
 import atri.palaash.jvosk.util.AppPreferences;
 import atri.palaash.jvosk.util.AudioInfo;
+import atri.palaash.jvosk.util.MediaFormats;
 import atri.palaash.jvosk.util.TranscriptExporter;
 
 import javax.swing.*;
@@ -44,6 +45,7 @@ public class MainFrame extends JFrame {
     private JButton browseButton;
     private JCheckBoxMenuItem timestampMenuItem;
     private JCheckBoxMenuItem darkModeMenuItem;
+    private JCheckBoxMenuItem enhanceSpeechMenuItem;
 
     public MainFrame() {
         this(null);
@@ -179,27 +181,35 @@ public class MainFrame extends JFrame {
                 try {
                     this.transcriber = new VoskTranscriber(modelPath);
                 } catch (Exception e) {
-                    // Try default model location
-                    File modelDir = new File("models/vosk-model-small-en-us-0.15");
-                    if (modelDir.exists()) {
-                        this.transcriber = new VoskTranscriber(modelDir.getAbsolutePath());
-                        AppPreferences.setSelectedModel(modelDir.getAbsolutePath());
+                    // A checksum-verified catalogue rename can move the selected
+                    // folder while this thread starts. Retry the updated path.
+                    String updatedPath = AppPreferences.getSelectedModel();
+                    if (!updatedPath.equals(modelPath) && new File(updatedPath).isDirectory()) {
+                        this.transcriber = new VoskTranscriber(updatedPath);
                     } else {
-                        // No model found
-                        this.transcriber = null;
-                        SwingUtilities.invokeLater(() -> {
-                            setStatus("No speech model found");
-                            progressBar.setVisible(false);
-                            JOptionPane.showMessageDialog(MainFrame.this,
-                                    "No speech model found. Please download a model first.\n\n" +
-                                    "Opening Model Manager...",
-                                    "Model Required",
-                                    JOptionPane.WARNING_MESSAGE);
-                            openModelManager();
-                        });
-                        return;
+                        // Try default model location
+                        File modelDir = new File("models/vosk-model-small-en-us-0.15");
+                        if (modelDir.exists()) {
+                            this.transcriber = new VoskTranscriber(modelDir.getAbsolutePath());
+                            AppPreferences.setSelectedModel(modelDir.getAbsolutePath());
+                        } else {
+                            // No model found
+                            this.transcriber = null;
+                            SwingUtilities.invokeLater(() -> {
+                                setStatus("No speech model found");
+                                progressBar.setVisible(false);
+                                JOptionPane.showMessageDialog(MainFrame.this,
+                                        "No speech model found. Please download a model first.\n\n" +
+                                        "Opening Model Manager...",
+                                        "Model Required",
+                                        JOptionPane.WARNING_MESSAGE);
+                                openModelManager();
+                            });
+                            return;
+                        }
                     }
                 }
+                applyEnhanceSpeech();
                 
                 // Model loaded successfully
                 SwingUtilities.invokeLater(() -> {
@@ -231,7 +241,7 @@ public class MainFrame extends JFrame {
         JMenu fileMenu = new JMenu("File");
         fileMenu.setMnemonic(KeyEvent.VK_F);
         
-        JMenuItem openItem = new JMenuItem("Open Audio File...");
+        JMenuItem openItem = new JMenuItem("Open Audio or Video File...");
         openItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()));
         openItem.addActionListener(e -> browseForFile());
         fileMenu.add(openItem);
@@ -300,6 +310,11 @@ public class MainFrame extends JFrame {
         timestampMenuItem.setSelected(AppPreferences.isShowTimestamps());
         timestampMenuItem.addActionListener(e -> toggleTimestamps());
         viewMenu.add(timestampMenuItem);
+
+        enhanceSpeechMenuItem = new JCheckBoxMenuItem("Enhance Speech (filter music/noise)");
+        enhanceSpeechMenuItem.setSelected(AppPreferences.isEnhanceSpeech());
+        enhanceSpeechMenuItem.addActionListener(e -> toggleEnhanceSpeech());
+        viewMenu.add(enhanceSpeechMenuItem);
         
         viewMenu.addSeparator();
         
@@ -335,10 +350,10 @@ public class MainFrame extends JFrame {
 
     private JPanel createDropPanel() {
         JPanel panel = new JPanel(new BorderLayout(8, 8));
-        panel.setBorder(BorderFactory.createTitledBorder("Select or drag & drop audio file"));
+        panel.setBorder(BorderFactory.createTitledBorder("Select or drag & drop audio or video"));
         panel.setPreferredSize(new Dimension(200, 100));
         
-        JLabel dropLabel = new JLabel("<html><center>Drag & drop an audio file<br><small>WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS</small></center></html>", SwingConstants.CENTER);
+        JLabel dropLabel = new JLabel("<html><center>Drag & drop an audio or video file<br><small>WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS, MP4, MKV, MOV, WEBM, AVI</small></center></html>", SwingConstants.CENTER);
         panel.add(dropLabel, BorderLayout.CENTER);
         
         browseButton = new JButton("Browse Files...");
@@ -402,10 +417,16 @@ public class MainFrame extends JFrame {
 
     private void browseForFile() {
         JFileChooser fileChooser = new JFileChooser(AppPreferences.getLastOpenDir());
-        fileChooser.setDialogTitle("Select Audio File");
-        fileChooser.setFileFilter(new FileNameExtensionFilter(
-            "Audio Files (*.wav, *.mp3, *.m4a, *.flac, *.ogg, *.aac, *.wma, *.opus)",
-            "wav", "mp3", "m4a", "flac", "ogg", "aac", "wma", "opus"));
+        fileChooser.setDialogTitle("Select Audio or Video File");
+        FileNameExtensionFilter all = new FileNameExtensionFilter(
+                "Audio and video", MediaFormats.allExtensions());
+        FileNameExtensionFilter audio = new FileNameExtensionFilter(
+                "Audio (WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS)", MediaFormats.AUDIO_EXTENSIONS);
+        FileNameExtensionFilter video = new FileNameExtensionFilter(
+                "Video (MP4, MKV, MOV, WEBM, AVI, M4V)", MediaFormats.VIDEO_EXTENSIONS);
+        fileChooser.addChoosableFileFilter(audio);
+        fileChooser.addChoosableFileFilter(video);
+        fileChooser.setFileFilter(all);
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -416,6 +437,14 @@ public class MainFrame extends JFrame {
     }
 
     private void startTranscription(File audioFile) {
+        if (!MediaFormats.isSupported(audioFile.getName())) {
+            JOptionPane.showMessageDialog(this,
+                    "Unsupported file type. Open an audio or video file.",
+                    "Unsupported file",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         if (!modelReady || transcriber == null) {
             JOptionPane.showMessageDialog(this,
                     "Model is still loading. Please wait...",
@@ -670,6 +699,21 @@ public class MainFrame extends JFrame {
         setStatus(show ? "Timestamps enabled for next transcription" : "Timestamps disabled");
     }
 
+    private void toggleEnhanceSpeech() {
+        boolean enhance = enhanceSpeechMenuItem.isSelected();
+        AppPreferences.setEnhanceSpeech(enhance);
+        applyEnhanceSpeech();
+        setStatus(enhance
+                ? "Speech enhance on: music/noise filtered on the next file"
+                : "Speech enhance off");
+    }
+
+    private void applyEnhanceSpeech() {
+        if (transcriber != null) {
+            transcriber.setEnhanceSpeech(AppPreferences.isEnhanceSpeech());
+        }
+    }
+
     private void changeFontSize(int delta) {
         int currentSize = AppPreferences.getFontSize();
         int newSize = Math.max(8, Math.min(32, currentSize + delta));
@@ -848,6 +892,7 @@ public class MainFrame extends JFrame {
             modelLoadingThread = new Thread(() -> {
                 try {
                     this.transcriber = new VoskTranscriber(modelPath);
+                    applyEnhanceSpeech();
                     AppPreferences.setSelectedModel(modelPath);
                     
                     SwingUtilities.invokeLater(() -> {

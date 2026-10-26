@@ -1,8 +1,12 @@
 package atri.palaash.jvosk.util;
 
 import java.io.File;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.prefs.Preferences;
 
 public class AppPreferences {
@@ -16,6 +20,7 @@ public class AppPreferences {
     private static final String RECENT_FILES = "recentFiles";
     private static final String SELECTED_MODEL = "selectedModel";
     private static final String FONT_SIZE = "fontSize";
+    private static final String ENHANCE_SPEECH = "enhanceSpeech";
     private static final int MAX_RECENT_FILES = 10;
     
     public static String getLastSaveDir() {
@@ -49,6 +54,14 @@ public class AppPreferences {
     public static void setShowTimestamps(boolean show) {
         prefs.putBoolean(SHOW_TIMESTAMPS, show);
     }
+
+    public static boolean isEnhanceSpeech() {
+        return prefs.getBoolean(ENHANCE_SPEECH, false);
+    }
+
+    public static void setEnhanceSpeech(boolean enhance) {
+        prefs.putBoolean(ENHANCE_SPEECH, enhance);
+    }
     
     public static String getSelectedModel() {
         return prefs.get(SELECTED_MODEL, "models/vosk-model-small-en-us-0.15");
@@ -56,6 +69,35 @@ public class AppPreferences {
     
     public static void setSelectedModel(String modelPath) {
         prefs.put(SELECTED_MODEL, modelPath);
+    }
+
+    /**
+     * Point the saved model path at its new directory after a verified
+     * catalogue rename. Only paths directly inside {@code modelsDirectory} are
+     * remapped, so unrelated saved paths are never rewritten.
+     *
+     * @param modelsDirectory root that contains installed model directories
+     * @param renames old directory name to new directory name
+     */
+    public static void remapSelectedModel(Path modelsDirectory, Map<String, String> renames) {
+        if (modelsDirectory == null || renames == null || renames.isEmpty()) {
+            return;
+        }
+        Path selected;
+        try {
+            selected = Paths.get(getSelectedModel()).toAbsolutePath().normalize();
+        } catch (InvalidPathException e) {
+            return;
+        }
+        for (Map.Entry<String, String> rename : renames.entrySet()) {
+            Path oldPath = modelsDirectory.resolve(rename.getKey()).toAbsolutePath().normalize();
+            if (selected.equals(oldPath)) {
+                Path newPath = modelsDirectory.resolve(rename.getValue())
+                        .toAbsolutePath().normalize();
+                setSelectedModel(newPath.toString());
+                return;
+            }
+        }
     }
     
     public static int getFontSize() {

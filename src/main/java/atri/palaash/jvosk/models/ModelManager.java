@@ -24,10 +24,14 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -219,7 +223,10 @@ public class ModelManager {
         metadata.catalogueVersion = model.getCatalogueVersion();
         metadata.archiveSizeBytes = model.getSizeBytes();
         metadata.checksumMd5 = model.getChecksumMd5();
+        persistInstallMetadata(modelPath, metadata);
+    }
 
+    private static void persistInstallMetadata(Path modelPath, InstallMetadata metadata) throws IOException {
         Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
         Path temporaryPath = modelPath.resolve(INSTALL_METADATA_FILE + ".part");
         try {
@@ -299,6 +306,162 @@ public class ModelManager {
      */
     public List<VoskModel> getInstalledModelsWithoutUpdateMetadata() {
         return getInstalledModels().stream().filter(model -> !hasInstallMetadata(model)).toList();
+    }
+
+    /**
+     * Write a metadata stub for valid installed models that predate persistence.
+     * Existing {@code .jvosk-install.json} files are left unchanged, including
+     * ones this version cannot parse. Catalogue version, size and checksum are
+     * not copied from the model name — those remain unset until a verified
+     * install. Returns the number of files written.
+     */
+    public int migrateLegacyInstalls() throws IOException {
+        scanInstalledModels();
+        int written = 0;
+        for (VoskModel installed : getInstalledModels()) {
+            Path modelPath = modelsDirectory.resolve(installed.getName());
+            Path metadataPath = modelPath.resolve(INSTALL_METADATA_FILE);
+            if (Files.exists(metadataPath)) {
+                continue;
+            }
+            writeLegacyInstallStub(modelPath, installed.getName());
+            written++;
+        }
+        if (written > 0) {
+            scanInstalledModels();
+        }
+        return written;
+    }
+
+    private void writeLegacyInstallStub(Path modelPath, String modelName) throws IOException {
+        InstallMetadata metadata = new InstallMetadata();
+        metadata.schemaVersion = INSTALL_METADATA_SCHEMA;
+        metadata.modelName = modelName;
+        metadata.catalogueVersion = null;
+        metadata.archiveSizeBytes = 0;
+        metadata.checksumMd5 = null;
+        persistInstallMetadata(modelPath, metadata);
+    }
+
+    /**
+     * Detect installed models that were renamed in the catalogue.
+     *
+     * <p>A rename is only accepted when the installed model has persisted
+     * metadata whose checksum matches exactly one current catalogue entry and
+     * the target name is not already installed. Directory names alone are not
+     * trusted, so legacy installs without a verified checksum are never moved
+     * by this method.</p>
+     *
+     * @param catalogue current catalogue entries
+     * @return old directory name to matching catalogue entry, in installed order
+     */
+    public Map<String, VoskModel> findCatalogueRenames(List<VoskModel> catalogue) {
+        Objects.requireNonNull(catalogue, "catalogue");
+        Set<String> catalogueNames = new HashSet<>();
+        Map<String, List<VoskModel>> byChecksum = new HashMap<>();
+        for (VoskModel model : catalogue) {
+            // getAvailableModels() appends locally installed rows that dropped
+            // out of the catalogue. Those are not catalogue names and must not
+            // hide an otherwise verified rename.
+            if (INSTALLED_MODEL_URL.equals(model.getDownloadUrl())) {
+                continue;
+            }
+            catalogueNames.add(model.getName());
+            String checksum = normalizedChecksum(model.getChecksumMd5());
+            if (checksum != null) {
+                byChecksum.computeIfAbsent(checksum, ignored -> new ArrayList<>()).add(model);
+            }
+        }
+
+        Map<String, VoskModel> renames = new LinkedHashMap<>();
+        Set<String> claimedTargets = new HashSet<>();
+        for (VoskModel installed : getInstalledModels()) {
+            if (catalogueNames.contains(installed.getName())) {
+                continue;
+            }
+            String checksum = normalizedChecksum(installed.getChecksumMd5());
+            if (checksum == null) {
+                continue;
+            }
+            List<VoskModel> matches = byChecksum.get(checksum);
+            if (matches == null || matches.size() != 1) {
+                continue;
+            }
+            VoskModel target = matches.get(0);
+            if (installedModels.containsKey(target.getName()) || !claimedTargets.add(target.getName())) {
+                continue;
+            }
+            renames.put(installed.getName(), target);
+        }
+        return renames;
+    }
+
+    /**
+     * Apply checksum-verified catalogue renames by moving each verified install
+     * to the catalogue directory name and recording the new install metadata.
+     *
+     * <p>This performs directory I/O and must not run on the Swing event
+     * dispatch thread.</p>
+     *
+     * @return old name to new name for every migrated install
+     * @throws IOException if a directory move or metadata write fails
+     */
+    public Map<String, String> migrateCatalogueRenames() throws IOException {
+        return migrateCatalogueRenames(registry.fetchModels(false));
+    }
+
+    /**
+     * Apply checksum-verified catalogue renames using a supplied catalogue,
+     * avoiding network access when the caller already has the model list.
+     *
+     * @param catalogue current catalogue entries
+     * @return old name to new name for every migrated install
+     * @throws IOException if a directory move or metadata write fails
+     */
+    public Map<String, String> migrateCatalogueRenames(List<VoskModel> catalogue) throws IOException {
+        Map<String, VoskModel> renames = findCatalogueRenames(catalogue);
+        Map<String, String> migrated = new LinkedHashMap<>();
+        for (Map.Entry<String, VoskModel> rename : renames.entrySet()) {
+            migrateInstalledName(rename.getKey(), rename.getValue());
+            migrated.put(rename.getKey(), rename.getValue().getName());
+        }
+        if (!migrated.isEmpty()) {
+            scanInstalledModels();
+        }
+        return migrated;
+    }
+
+    private void migrateInstalledName(String oldName, VoskModel target) throws IOException {
+        String safeOldName = requireSafeModelName(oldName);
+        String safeNewName = requireSafeModelName(target.getName());
+        Path source = modelsDirectory.resolve(safeOldName);
+        Path destination = modelsDirectory.resolve(safeNewName);
+        if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Installed model directory is missing: " + safeOldName);
+        }
+        if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Cannot adopt catalogue name; destination already exists: " + safeNewName);
+        }
+
+        unloadModel(safeOldName);
+        moveIntoPlace(source, destination);
+        try {
+            writeInstallMetadata(destination, target);
+        } catch (IOException e) {
+            try {
+                moveIntoPlace(destination, source);
+            } catch (IOException rollbackFailure) {
+                e.addSuppressed(rollbackFailure);
+            }
+            throw e;
+        }
+
+        installedModels.remove(safeOldName);
+        installedModels.put(safeNewName, readInstalledModel(destination, safeNewName));
+    }
+
+    private static String normalizedChecksum(String checksum) {
+        return isKnown(checksum) ? checksum.trim().toLowerCase(Locale.ROOT) : null;
     }
 
     /**
