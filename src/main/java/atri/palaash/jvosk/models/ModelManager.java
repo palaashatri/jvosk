@@ -45,6 +45,8 @@ public class ModelManager {
     private static final String INSTALLED_MODEL_URL = "installed://local";
     private static final String INSTALL_METADATA_FILE = ".jvosk-install.json";
     private static final int INSTALL_METADATA_SCHEMA = 1;
+    private static final String QUEUE_STATE_FILE = ".jvosk-download-queue.json";
+    private static final int QUEUE_STATE_SCHEMA = 1;
     private static final int CONNECT_TIMEOUT_MS = 15_000;
     private static final int READ_TIMEOUT_MS = 30_000;
     private static final Pattern CONTENT_RANGE_PATTERN = Pattern.compile("^bytes (\\d+)-(\\d+)/(\\d+|\\*)$");
@@ -122,21 +124,43 @@ public class ModelManager {
      * alone because their original archive cannot be identified reliably.
      */
     public Map<String, VoskModel> checkForUpdates() throws IOException {
+        return checkForUpdatesWithMigration().getUpdates();
+    }
+
+    /**
+     * Check for updates and migrate legacy installations whose metadata can be
+     * seeded from the current catalogue.
+     */
+    public UpdateCheckResult checkForUpdatesWithMigration() throws IOException {
         List<VoskModel> availableModels = registry.fetchModels(true);
         Map<String, VoskModel> updates = new HashMap<>();
+        Map<String, VoskModel> availableByName = availableModels.stream()
+                .collect(java.util.stream.Collectors.toMap(VoskModel::getName, model -> model, (a, b) -> a));
+        List<String> migrated = new ArrayList<>();
+        List<String> unresolved = new ArrayList<>();
 
         for (VoskModel installed : installedModels.values()) {
-            VoskModel available = availableModels.stream()
-                    .filter(model -> model.getName().equals(installed.getName()))
-                    .findFirst()
-                    .orElse(null);
+            VoskModel available = availableByName.get(installed.getName());
+            if (!hasInstallMetadata(installed)) {
+                if (available != null && hasInstallMetadata(available)) {
+                    Path modelPath = modelsDirectory.resolve(installed.getName());
+                    writeInstallMetadata(modelPath, available);
+                    VoskModel refreshed = readInstalledModel(modelPath, installed.getName());
+                    installedModels.put(installed.getName(), refreshed);
+                    installed = refreshed;
+                    migrated.add(installed.getName());
+                } else {
+                    unresolved.add(installed.getName());
+                }
+            }
+
             if (available != null && hasInstallMetadata(installed)
                     && catalogueMetadataDiffers(installed, available)) {
                 updates.put(available.getName(), available.withInstalled(installed.getInstalledVersion()));
             }
         }
 
-        return updates;
+        return new UpdateCheckResult(updates, migrated, unresolved);
     }
 
     private static boolean hasInstallMetadata(VoskModel installed) {
@@ -299,6 +323,69 @@ public class ModelManager {
      */
     public List<VoskModel> getInstalledModelsWithoutUpdateMetadata() {
         return getInstalledModels().stream().filter(model -> !hasInstallMetadata(model)).toList();
+    }
+
+    /**
+     * Persist queued model names so users can resume a queue after restart.
+     */
+    public synchronized void saveQueuedDownloads(List<String> modelNames) throws IOException {
+        List<String> safeNames = new ArrayList<>();
+        for (String modelName : modelNames) {
+            String safeName = requireSafeModelName(modelName);
+            if (!safeNames.contains(safeName)) {
+                safeNames.add(safeName);
+            }
+        }
+
+        Path queuePath = modelsDirectory.resolve(QUEUE_STATE_FILE);
+        if (safeNames.isEmpty()) {
+            deleteQuietly(queuePath);
+            return;
+        }
+
+        QueueState state = new QueueState();
+        state.schemaVersion = QUEUE_STATE_SCHEMA;
+        state.modelNames = List.copyOf(safeNames);
+        Path temporaryPath = modelsDirectory.resolve(QUEUE_STATE_FILE + ".part");
+        try {
+            OBJECT_MAPPER.writeValue(temporaryPath.toFile(), state);
+            moveIntoPlace(temporaryPath, queuePath);
+        } finally {
+            deleteQuietly(temporaryPath);
+        }
+    }
+
+    /**
+     * Load any queued model names from the last session.
+     */
+    public synchronized List<String> loadQueuedDownloads() throws IOException {
+        Path queuePath = modelsDirectory.resolve(QUEUE_STATE_FILE);
+        if (!Files.isRegularFile(queuePath, LinkOption.NOFOLLOW_LINKS)) {
+            return List.of();
+        }
+
+        QueueState state;
+        try {
+            state = OBJECT_MAPPER.readValue(queuePath.toFile(), QueueState.class);
+        } catch (IOException | RuntimeException e) {
+            deleteQuietly(queuePath);
+            return List.of();
+        }
+        if (state.schemaVersion != QUEUE_STATE_SCHEMA || state.modelNames == null) {
+            deleteQuietly(queuePath);
+            return List.of();
+        }
+
+        List<String> safeNames = new ArrayList<>();
+        for (String modelName : state.modelNames) {
+            if (VoskModel.isSafeModelName(modelName) && !safeNames.contains(modelName)) {
+                safeNames.add(modelName);
+            }
+        }
+        if (safeNames.isEmpty()) {
+            deleteQuietly(queuePath);
+        }
+        return List.copyOf(safeNames);
     }
 
     /**
@@ -911,6 +998,37 @@ public class ModelManager {
         public String catalogueVersion;
         public long archiveSizeBytes;
         public String checksumMd5;
+    }
+
+    private static final class QueueState {
+        public int schemaVersion;
+        public List<String> modelNames;
+    }
+
+    public static final class UpdateCheckResult {
+        private final Map<String, VoskModel> updates;
+        private final List<String> migratedLegacyInstalls;
+        private final List<String> unresolvedLegacyInstalls;
+
+        private UpdateCheckResult(Map<String, VoskModel> updates,
+                                  List<String> migratedLegacyInstalls,
+                                  List<String> unresolvedLegacyInstalls) {
+            this.updates = Map.copyOf(updates);
+            this.migratedLegacyInstalls = List.copyOf(migratedLegacyInstalls);
+            this.unresolvedLegacyInstalls = List.copyOf(unresolvedLegacyInstalls);
+        }
+
+        public Map<String, VoskModel> getUpdates() {
+            return updates;
+        }
+
+        public List<String> getMigratedLegacyInstalls() {
+            return migratedLegacyInstalls;
+        }
+
+        public List<String> getUnresolvedLegacyInstalls() {
+            return unresolvedLegacyInstalls;
+        }
     }
 
     public Path getModelsDirectory() {
