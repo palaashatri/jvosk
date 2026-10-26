@@ -62,7 +62,7 @@ Tests: `src/test/java/...`; golden exports in `src/test/resources/golden/`.
 
 1. Add `jpackage` installers and publish release assets from signed version tags.
 2. Add Swing UI tests for update/reinstall, queue cancellation and partial-download status.
-3. Add a model/catalogue migration utility for legacy installs instead of requiring a reinstall to seed metadata.
+3. Model/catalogue migration utility added (`ModelMigration.migrateLegacyModels`) for legacy installs.
 4. Consider resumable queue persistence across application restarts.
 
 ## Git workflow
