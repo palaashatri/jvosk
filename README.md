@@ -33,10 +33,11 @@ Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi
   - Delete unused models
   - See installed/available status per model
 
-### Audio Support
-- **Multiple Formats**: WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS
-- **Automatic Conversion**: Built-in audio conversion (no ffmpeg required!)
-- **Drag & Drop**: Simply drag audio files into the app
+### Audio and video
+- **Multiple Formats**: WAV, MP3, M4A, FLAC, OGG, AAC, WMA, OPUS plus video (MP4, MKV, MOV, WEBM, AVI)
+- **Automatic Conversion**: Bundled JAVE/FFmpeg extracts audio from video; no host ffmpeg
+- **Speech enhance**: optional View-menu filter (speech-band high/low-pass + loudness normalize) to reduce music/noise before recognition
+- **Drag & Drop**: Drag audio or video files into the app
 - **File Browser**: Standard file picker with format filtering
 
 ### Transcription
@@ -96,6 +97,7 @@ In priority order — each is something a user would notice:
 - Persisted the Model Manager download queue across restarts; cancelled queues can be resumed.
 - Added Swing tests for update/reinstall labels, queue cancellation leftovers and partial-download status.
 - Added a signed-tag release workflow that publishes `jpackage` installers.
+- Video files (MP4/MKV/MOV/WEBM/AVI) transcribe through bundled JAVE FFmpeg; optional **Enhance Speech** filters music/noise.
 
 ## Quick Start
 
@@ -215,15 +217,17 @@ time Model Manager opens. Large models show a confirmation prompt before downloa
 
 - **Check for Updates** compares persisted catalogue version, checksum and
   exact archive size against the current catalogue.
-- Existing installations from earlier versions have no saved metadata. The UI
-  marks them as unverifiable and offers a one-time reinstall to enable tracking.
+- Legacy folders that match a catalogue name are seeded with
+  `.jvosk-install.json` on startup, so they join update tracking without a
+  reinstall. Installs whose names are no longer in the catalogue still need a
+  one-time reinstall.
 - Updates are never applied automatically. Select an updated model and choose
   **Update Model**, or add it to the queue. Staged installation keeps the old
   model unless the new archive verifies and extracts successfully.
 
 ![Update check showing a catalogue update and a legacy installation that needs verification](docs/screenshots/model-manager-update-check.png)
 
-*Update checks distinguish catalogue changes from older installs that need a one-time reinstall to seed metadata.*
+*Update checks distinguish catalogue changes from older installs that still need a reinstall because they are no longer in the catalogue.*
 
 ![An installed model with an update available](docs/screenshots/model-manager-update.png)
 
@@ -231,7 +235,7 @@ time Model Manager opens. Large models show a confirmation prompt before downloa
 
 ![A legacy installation offered for one-time reinstall](docs/screenshots/model-manager-reinstall.png)
 
-*Choose **Reinstall Model** once to save catalogue metadata for a legacy install.*
+*Choose **Reinstall Model** only when the folder name is not in the current catalogue.*
 
 ### Deleting Models
 

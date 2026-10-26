@@ -16,6 +16,7 @@ public class AppPreferences {
     private static final String RECENT_FILES = "recentFiles";
     private static final String SELECTED_MODEL = "selectedModel";
     private static final String FONT_SIZE = "fontSize";
+    private static final String ENHANCE_SPEECH = "enhanceSpeech";
     private static final int MAX_RECENT_FILES = 10;
     
     public static String getLastSaveDir() {
@@ -48,6 +49,14 @@ public class AppPreferences {
     
     public static void setShowTimestamps(boolean show) {
         prefs.putBoolean(SHOW_TIMESTAMPS, show);
+    }
+
+    public static boolean isEnhanceSpeech() {
+        return prefs.getBoolean(ENHANCE_SPEECH, false);
+    }
+
+    public static void setEnhanceSpeech(boolean enhance) {
+        prefs.putBoolean(ENHANCE_SPEECH, enhance);
     }
     
     public static String getSelectedModel() {

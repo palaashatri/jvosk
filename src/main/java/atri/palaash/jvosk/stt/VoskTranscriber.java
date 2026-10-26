@@ -1,12 +1,9 @@
 package atri.palaash.jvosk.stt;
 
+import atri.palaash.jvosk.util.MediaConverter;
+import atri.palaash.jvosk.util.MediaFormats;
 import org.vosk.Model;
 import org.vosk.Recognizer;
-import ws.schild.jave.Encoder;
-import ws.schild.jave.EncoderException;
-import ws.schild.jave.MultimediaObject;
-import ws.schild.jave.encode.AudioAttributes;
-import ws.schild.jave.encode.EncodingAttributes;
 
 import javax.sound.sampled.*;
 import java.io.*;
@@ -18,6 +15,7 @@ public class VoskTranscriber {
     private Model model;
     private String currentModelPath;
     private boolean ownsModel; // Track whether we should close the model
+    private boolean enhanceSpeech;
 
     public VoskTranscriber(String modelPath) {
         this.currentModelPath = modelPath;
@@ -71,17 +69,28 @@ public class VoskTranscriber {
         return model;
     }
 
+    /**
+     * When true, conversion applies a cheap speech-band filter to reduce
+     * music/noise before recognition (lyrics / noisy video).
+     */
+    public void setEnhanceSpeech(boolean enhanceSpeech) {
+        this.enhanceSpeech = enhanceSpeech;
+    }
+
+    public boolean isEnhanceSpeech() {
+        return enhanceSpeech;
+    }
 
     public void transcribeFile(File audioFile, Consumer<String> onText) throws InterruptedException {
         File tempWav = null;
         
         try {
-            String fileName = audioFile.getName().toLowerCase();
             File fileToTranscribe = audioFile;
-            
-            // Convert non-WAV files using JAVE2
-            if (needsConversion(fileName)) {
-                tempWav = convertToWavWithJave(audioFile);
+            boolean convert = MediaFormats.needsConversion(audioFile.getName()) || enhanceSpeech;
+            if (convert) {
+                System.out.println("Converting " + audioFile.getName() + " to WAV format"
+                        + (enhanceSpeech ? " (speech enhance)" : "") + "...");
+                tempWav = MediaConverter.toPcmWav(audioFile, enhanceSpeech);
                 fileToTranscribe = tempWav;
             }
             
@@ -100,64 +109,6 @@ public class VoskTranscriber {
                     Files.delete(tempWav.toPath());
                 } catch (IOException ignored) {}
             }
-        }
-    }
-    
-    private boolean needsConversion(String fileName) {
-        return fileName.endsWith(".mp3") || 
-               fileName.endsWith(".m4a") || 
-               fileName.endsWith(".flac") || 
-               fileName.endsWith(".ogg") || 
-               fileName.endsWith(".aac") || 
-               fileName.endsWith(".wma") ||
-               fileName.endsWith(".opus");
-    }
-    
-    private File convertToWavWithJave(File audioFile) throws IOException, InterruptedException {
-        try {
-            // Check for cancellation before starting conversion
-            if (Thread.currentThread().isInterrupted()) {
-                throw new InterruptedException("Conversion cancelled by user");
-            }
-            
-            // Create temp WAV file
-            File tempWav = File.createTempFile("jvosk_", ".wav");
-            
-            System.out.println("Converting " + audioFile.getName() + " to WAV format...");
-            
-            // Configure audio attributes: 16kHz, mono, 16-bit PCM
-            AudioAttributes audio = new AudioAttributes();
-            audio.setCodec("pcm_s16le");      // 16-bit signed PCM little-endian
-            audio.setSamplingRate(16000);     // 16kHz sample rate
-            audio.setChannels(1);             // Mono
-            audio.setBitRate(256000);         // Standard bit rate
-            
-            // Configure encoding attributes
-            EncodingAttributes attrs = new EncodingAttributes();
-            attrs.setOutputFormat("wav");
-            attrs.setAudioAttributes(audio);
-            
-            // Perform conversion
-            Encoder encoder = new Encoder();
-            encoder.encode(new MultimediaObject(audioFile), tempWav, attrs);
-            
-            // Check for cancellation after conversion
-            if (Thread.currentThread().isInterrupted()) {
-                // Clean up temp file if cancelled
-                if (tempWav.exists()) {
-                    tempWav.delete();
-                }
-                throw new InterruptedException("Conversion cancelled by user");
-            }
-            
-            System.out.println("Conversion complete. Starting transcription...");
-            return tempWav;
-            
-        } catch (EncoderException e) {
-            throw new IOException(
-                "Audio conversion failed. The file may be corrupted or in an unsupported format.\n" +
-                "Error: " + e.getMessage(), e
-            );
         }
     }
     

@@ -1,8 +1,8 @@
 # AGENTS.md — jvosk
 
-jvosk is a Java 17 Swing desktop app for offline speech-to-text with [Vosk](https://alphacephei.com/vosk/). It downloads and manages Vosk models, converts common audio formats with JAVE (bundled ffmpeg), and exports TXT, SRT, VTT, JSON and Markdown. UI uses FlatLaf.
+jvosk is a Java 17 Swing desktop app for offline speech-to-text with [Vosk](https://alphacephei.com/vosk/). It downloads and manages Vosk models, converts common audio and video formats with JAVE (bundled ffmpeg), optionally filters music/noise before recognition, and exports TXT, SRT, VTT, JSON and Markdown. UI uses FlatLaf.
 
-## Current state (2026-10-24)
+## Current state (2026-10-26)
 
 - Works as a single-window app; last code change was October 2026.
 - **JUnit 5 suite and GitHub Actions CI.** Unit tests run with `mvn -B verify`; CI also runs `mvn -B -Pintegration-tests verify` on Linux, macOS and Windows, then retains each platform's shaded jar.
@@ -34,9 +34,9 @@ Models are stored in `~/.jvosk/models/<model-name>/`.
 |---|---|
 | `App.java` | Entry point: look-and-feel, model manager, background update check |
 | `models/` | `ModelRegistry` (JSON catalogue + offline snapshot), `ModelManager` (metadata, resume/queue, verified staged install/delete/scan/legacy migration), `DownloadManager`, `DownloadQueue`, `VoskModel` |
-| `stt/VoskTranscriber.java` | Audio → 16 kHz mono PCM via JAVE, Vosk recognition, timestamps |
+| `stt/VoskTranscriber.java` | Audio/video → 16 kHz mono PCM via JAVE, optional speech-band enhance, Vosk recognition, timestamps |
 | `ui/` | `MainFrame` (drop zone, transcription, export, shortcuts), `ModelManagerDialog`, `ModelTableModel`, `ModelDownloadActions` |
-| `util/` | Preferences, audio info, network checks, `TranscriptExporter`, `ModelMigration` |
+| `util/` | Preferences, audio info, network checks, `TranscriptExporter`, `ModelMigration`, `MediaFormats`, `MediaConverter` |
 
 Catalogue snapshot: `src/main/resources/atri/palaash/jvosk/models/model-list.json`.
 Tests: `src/test/java/...`; golden exports in `src/test/resources/golden/`.
