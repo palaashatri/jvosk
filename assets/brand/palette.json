@@ -1,9 +1,11 @@
 {
-  "name": "jvosk",
-  "accent": "#67E8D0",
-  "background": "#101723",
-  "foreground": "#F2F6FF",
-  "sizes": [
+  "app": "jvosk",
+  "accent": "#15BDBC",
+  "background": "#101720",
+  "foreground": "#F4F7FC",
+  "style": "dimensional ceramic and translucent glass",
+  "sourceCropPx": 248,
+  "exportedPngSizes": [
     16,
     24,
     32,
@@ -13,5 +15,6 @@
     256,
     512,
     1024
-  ]
+  ],
+  "largeExportNote": "512/1024 are upscaled from a generated contact-sheet crop; not original 1024px renders"
 }
