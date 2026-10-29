@@ -1,0 +1,13 @@
+{
+  "name": "JVosk",
+  "category": "Offline speech recognition",
+  "background": [
+    "#283c56",
+    "#17283d"
+  ],
+  "accent": "#8ac7cf",
+  "highlight": "#d4e8ec",
+  "typography": "Inter, Segoe UI, Arial",
+  "style": "muted-metal / enamel / soft-depth",
+  "license": "original project artwork"
+}

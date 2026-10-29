@@ -1,5 +1,10 @@
 # jvosk
 
+<img src="assets/brand/app-icon.svg" alt="JVosk icon" width="96" align="right" />
+
+[Icon, wordmark, and brand assets](assets/brand/README.md)
+
+
 Modern desktop application for speech-to-text transcription using Vosk offline speech recognition.
 
 Built with Java Swing and FlatLaf for a polished, cross-platform UI with **multi-model support**.
