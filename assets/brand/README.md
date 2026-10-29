@@ -1,11 +1,3 @@
-# JVOSK identity assets
+# JVosk icon identity — rendered redesign
 
-A coordinated dark-slate, satin-glass icon family with a distinctive speech recognition pictogram and restrained accent #67E8D0.
-
-- `icon.svg`: scalable full-color application icon (128×128 viewBox).
-- `icon-monochrome.svg`: single-color mark for light/dark context menus, tray and UI.
-- `wordmark.svg`: horizontal brand lockup.
-- `social-preview.svg`: 1200×630 repository/social artwork.
-- `palette.json`: palette and dimensions for downstream integration.
-
-All artwork is original vector geometry, has no embedded external resources, and retains sharp edges at any resolution. Export PNG sizes 16, 24, 32, 48, 64, 128, 256, 512 and 1024 using an SVG renderer (e.g. Inkscape). UI/build wiring is intentionally unchanged pending visual review.
+The new sculpted, translucent teal microphone icon supersedes the earlier rejected SVG line art. This directory contains source-size transparent PNG, resampled PNG exports at 16–1024px, Windows ICO, macOS ICNS, graphical wordmark and social preview. Artwork derives from a common generated 13-icon sheet: large exports are resampled from the ~248px crop and are *not* separately generated 1024px masters. Review small-size fidelity before packaging. Draft PR only; no merge.
